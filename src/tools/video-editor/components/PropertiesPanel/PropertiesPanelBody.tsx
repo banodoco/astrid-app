@@ -1,3 +1,4 @@
+import { transitionReferenceId } from '@/tools/video-editor/lib/transition-reference.ts';
 import { getEffectiveClipVolume } from '@/tools/video-editor/lib/clip-volume.ts';
 import { TimelineItemSelectionSummary } from './TimelineItemSelectionSummary.tsx';
 import { EMPTY_TIMELINE_DATA_ITEMS } from '@/shared/state/selectionStore.ts';
@@ -242,7 +243,7 @@ function PropertiesPanelComponent({
   const bulkFontSize = getSharedValue(bulkSelectedClips.map((clip) => clip.text?.fontSize ?? 64));
   const bulkTextColor = getSharedValue(bulkSelectedClips.map((clip) => clip.text?.color ?? '#ffffff'));
   const bulkTransition = getSharedNestedValue(bulkSelectedClips, (clip) => clip.transition);
-  const bulkTransitionType = getSharedValue(bulkSelectedClips.map((clip) => clip.transition?.type ?? NO_EFFECT));
+  const bulkTransitionType = getSharedValue(bulkSelectedClips.map((clip) => transitionReferenceId(clip.transition) ?? NO_EFFECT));
   const bulkTransitionDuration = getSharedValue(bulkSelectedClips.map((clip) => clip.transition?.duration ?? 0.5));
 
   useEffect(() => {

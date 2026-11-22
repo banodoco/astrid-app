@@ -68,7 +68,7 @@ const reads = [
   ['speed', 'f2-app-clip', { state: 'present', value: 1 }],
   ['asset', 'f2-app-clip', { state: 'present', value: 'f2-app' }],
   ['fps', 'output', { state: 'present', value: 30 }],
-  ['f2-app', 'assets', { state: 'present', value: original.parent_revision.payload.registry.assets['f2-app'] }],
+  ['duration', 'f2-app', { state: 'absent' }],
   ['kind', 'V1', { state: 'present', value: 'visual' }],
   ['pinnedShotGroups', 'config', { state: 'absent' }],
   ['collection', 'clips', null],
@@ -82,7 +82,7 @@ const reads = [
   ['to', 'f2-transition-clip', { state: 'present', value: 3 }],
   ['speed', 'f2-transition-clip', { state: 'present', value: 1 }],
   ['asset', 'f2-transition-clip', { state: 'present', value: 'f2-video' }],
-  ['f2-video', 'assets', { state: 'present', value: original.parent_revision.payload.registry.assets['f2-video'] }],
+  ['duration', 'f2-video', { state: 'absent' }],
 ];
 
 function fieldRead(path, state) {
@@ -94,7 +94,7 @@ function fixture() {
   const expectedReads = reads.map(([key, owner, state]) => {
     if (key === 'collection') return collection;
     if (key === 'fps') return fieldRead(['config', 'output', 'fps'], state);
-    if (key === 'f2-app' || key === 'f2-video') return fieldRead(['config', 'registry', 'assets', key], state);
+    if (key === 'duration') return fieldRead(['config', 'registry', 'assets', owner, key], state);
     if (key === 'kind') return fieldRead(['config', 'tracks', `id:${owner}`, 'kind'], state);
     if (key === 'pinnedShotGroups') return fieldRead(['config', key], state);
     return fieldRead(['config', 'clips', `id:${owner}`, key], state);

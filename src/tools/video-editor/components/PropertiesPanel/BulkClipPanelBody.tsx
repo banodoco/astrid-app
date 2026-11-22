@@ -24,6 +24,7 @@ import {
   type TransitionRegistryRecord,
 } from '@/tools/video-editor/transitions/registry/index.ts';
 import {
+  authoredTransitionId,
   listTransitions,
   resolveTransition,
   createTransitionSnapshot,
@@ -538,7 +539,7 @@ export function BulkClipPanelBody(props: BulkClipPanelProps & {effectResources: 
               <div className="space-y-2 md:col-span-2">
                 <FieldLabel>Transition</FieldLabel>
                 <Select
-                  value={sharedTransitionType ?? MIXED_SELECT_VALUE}
+                  value={resolvedTransitionRecord?.transitionId ?? sharedTransitionType ?? MIXED_SELECT_VALUE}
                   onValueChange={(value) => {
                     if (value === NO_TRANSITION || value === MIXED_SELECT_VALUE) {
                       onChangeDeep(() => ({ transition: undefined }));
@@ -550,7 +551,7 @@ export function BulkClipPanelBody(props: BulkClipPanelProps & {effectResources: 
                       : undefined;
                     onChangeDeep((meta) => ({
                       transition: {
-                        type: value,
+                        type: authoredTransitionId(value),
                         duration: meta.transition?.duration ?? sharedTransitionDuration ?? 0.5,
                         params: defaults && Object.keys(defaults).length > 0 ? defaults : undefined,
                       },
@@ -645,7 +646,7 @@ export function BulkClipPanelBody(props: BulkClipPanelProps & {effectResources: 
                         if (value !== null) {
                           onChangeDeep((meta) => ({
                             transition: {
-                              type: sharedTransitionType!,
+                              type: authoredTransitionId(sharedTransitionType!),
                               duration: value,
                               params: meta.transition?.params ?? sharedTransition?.params,
                             },
@@ -678,7 +679,7 @@ export function BulkClipPanelBody(props: BulkClipPanelProps & {effectResources: 
                           if (!sharedTransitionType || !resolvedTransitionRecord?.schema) return;
                           onChangeDeep(() => ({
                             transition: {
-                              type: sharedTransitionType,
+                              type: authoredTransitionId(sharedTransitionType),
                               duration: sharedTransitionDuration ?? 0.5,
                               params: materializeTransitionDefaults(resolvedTransitionRecord.schema),
                             },

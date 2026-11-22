@@ -8,6 +8,8 @@ import { Images, Loader2, Maximize2, Sparkles } from 'lucide-react';
 import { VIDEO_EDITOR_THEME_VARS } from '@/tools/video-editor/lib/themeTokens.ts';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/shared/components/ui/dialog.tsx';
 import { SaveBar } from './SaveBar.tsx';
+import { TimelineSaveNotice } from './TimelineSaveNotice.tsx';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/shared/components/ui/alert-dialog.tsx';
 import { Button } from '@/shared/components/ui/button.tsx';
 import { cn } from '@/shared/components/ui/contracts/cn.ts';
 import { COARSE_TOUCH_TARGET } from '@/shared/components/ui/contracts/touchTarget.ts';
@@ -80,6 +82,15 @@ import {
 /** The thumb bar's round buttons: 44px, quiet until pressed. */
 const THUMB_BAR_CIRCLE_CLASS = 'h-11 w-11 shrink-0 rounded-full border-border bg-card/95 text-muted-foreground shadow-sm hover:text-foreground';
 
+/** Shared copy for the conflict dialog and its inline save bar. */
+const TIMELINE_CONFLICT_SENTENCE = 'Keep your changes, or switch to the latest version.';
+const TIMELINE_CONFLICT_USE_LATEST = 'Use latest version';
+const TIMELINE_CONFLICT_KEEP_MINE = 'Keep my changes';
+
+/** Show the time a recovered draft was last written. */
+function formatDraftTime(updatedAt: number | string | Date): string {
+  return new Date(updatedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
 function PlaybackTimecode() {
   const currentTime = useTimelinePlaybackSelector((playback) => playback.currentTime);
   const formatTime = useTimelinePlaybackSelector((playback) => playback.formatTime);
@@ -326,7 +337,17 @@ function TimelineEditorShellCoreComponent({
     if (chrome.loadError) chrome.retryLoad();
     if (chrome.saveStatus === 'error' || chrome.saveStatus === 'dirty') chrome.retryPendingSave();
   });
-  useTimelineRealtime({ timelineId });
+  const guardedConflict = chrome.saveBar?.guardedConflict === true;
+  const keepTimelineConflict = guardedConflict ? chrome.tryAgain : chrome.retrySaveAfterConflict;
+  const discardTimelineConflict = guardedConflict ? chrome.discardUnsaved
+    : () => chrome.reloadFromServer({ discardRefusedSave: true });
+  const conflict = useTimelineRealtime({
+    timelineId,
+    conflictExhausted: !chrome.permanentSaveRejection && (guardedConflict || (!chrome.saveBar && chrome.isConflictExhausted)),
+    onKeepLocalChanges: keepTimelineConflict,
+    onDiscardRemoteChanges: discardTimelineConflict,
+  });
+  const showConflictDialog = conflict.isOpen && !chrome.permanentSaveRejection && (guardedConflict || !chrome.saveBar);
 
   useEffect(() => {
     bootDiagnostics();
@@ -788,6 +809,93 @@ function TimelineEditorShellCoreComponent({
     </div>
   );
 
+  /** Write-ack watchdog banner: an edit went unacknowledged (or was dropped on
+   *  the null-data path). Persistent and actionable — never a silent badge. */
+  const watchdogBanner = chrome.watchdogTripped && !chrome.saveBar && !chrome.permanentSaveRejection ? (
+    <SaveBar bar={{ kind: 'waiting', headline: chrome.watchdogReason === 'lost-edit'
+      ? 'Your edits could not be applied — the timeline is not loaded yet. Reload the timeline before editing.'
+      : 'Your changes have not been saved: the save never got a confirmation.', action: 'watchdog' }}
+      className="border-destructive/40 bg-destructive/10 text-destructive"
+      actions={<Button type="button" size="sm" variant="outline" onClick={chrome.retryWatchdog}>
+        {chrome.watchdogReason === 'lost-edit' ? 'Dismiss' : 'Retry save'}
+      </Button>} />
+  ) : null;
+
+  /** Diverged banner (B4): a 409 means the document changed elsewhere. No
+   *  silent overwrite — explicit Reload or Save as copy. */
+  // A save conflict is a choice between two versions, not an error: neutral, not destructive red.
+  // The dialog and this bar offer the same two buttons: the dialog is the one place while it is open, and this bar is
+  // the way back to the choice once it was dismissed.
+  const conflictActions = (
+    <div className="flex items-center gap-2">
+      <Button type="button" size="sm" variant="outline" onClick={() => void discardTimelineConflict()}>
+        {TIMELINE_CONFLICT_USE_LATEST}
+      </Button>
+      <Button type="button" size="sm" onClick={keepTimelineConflict}>
+        {TIMELINE_CONFLICT_KEEP_MINE}
+      </Button>
+    </div>
+  );
+  const conflictBanner = !chrome.permanentSaveRejection && (guardedConflict || (chrome.isConflictExhausted && !chrome.saveBar))
+    ? <SaveBar bar={{ kind: 'refused', headline: TIMELINE_CONFLICT_SENTENCE, action: 'conflict' }}
+        actions={conflictActions} className="border-border bg-muted/40 text-foreground" />
+    : null;
+
+  /** Schema rejection banner: the server could not validate the payload.
+   *  Freeze autosave until the user explicitly adopts the server version. */
+  const incompatibleBanner = chrome.schemaIncompatible && !chrome.saveBar && !chrome.permanentSaveRejection ? (
+    <SaveBar bar={{ kind: 'refused', headline: 'The timeline could not be saved because the payload is incompatible with the server schema.', action: 'pending' }}
+      className="border-destructive/40 bg-destructive/10 text-destructive"
+      children={<span>
+        The timeline could not be saved because the payload is incompatible with the server schema.
+        {chrome.schemaIncompatible.length > 0 && (
+          <span className="ml-2 text-xs opacity-80">
+            {chrome.schemaIncompatible.map((issue) => {
+              const location = issue.pointer ? ` at ${issue.pointer}` : '';
+              const detail = issue.message ? `: ${issue.message}` : '';
+              return `${issue.code ?? 'schema_error'}${location}${detail}`;
+            }).join('; ')}
+          </span>
+        )}
+      </span>}
+      actions={<Button type="button" size="sm" variant="outline" onClick={() => void chrome.reloadFromServer()}>Reload</Button>} />
+  ) : null;
+
+  /** A previous session left an unsaved edit in the IndexedDB recovery slot. */
+  const recoveryBanner = chrome.recoveryDraft && !chrome.permanentSaveRejection && !conflict.isOpen && !chrome.isConflictExhausted && !chrome.saveBar ? (
+    <SaveBar bar={{ kind: 'recovered', headline: `You have unsaved changes from ${formatDraftTime(chrome.recoveryDraft.updatedAt)}.`, action: chrome.recoveryDraft.retryAllowed === false ? 'none' : 'draft' }}
+      className="border-amber-500/40 bg-amber-500/10"
+      children={<span>
+        You have unsaved changes from {formatDraftTime(chrome.recoveryDraft.updatedAt)}.
+        {chrome.recoveryDraft.retryAllowed === false && ' The original editing head is unknown. This draft is preserved; discard it or resolve it explicitly before saving.'}
+      </span>}
+      actions={<div className="flex items-center gap-2">
+        <Button type="button" size="sm" variant="outline" disabled={chrome.recoveryDraft.retryAllowed === false} onClick={() => void chrome.retryRecoveredDraft()}>
+          Save them
+        </Button>
+        <Button type="button" size="sm" variant="outline" onClick={() => void chrome.discardRecoveredDraft()}>
+          Discard
+        </Button>
+      </div>} />
+  ) : null;
+
+  const renderSaveSurface = (): ReactNode => {
+    if (chrome.permanentSaveRejection) return <TimelineSaveNotice />;
+    if (showConflictDialog) return null;
+    if (guardedConflict) return conflictBanner;
+    if (chrome.recoveryRestoreAllowed && chrome.recoveryDraft) {
+      return <SaveBar bar={{ kind: 'recovered', headline: 'We kept your unsaved edit.', action: 'draft' }}
+        onTryAgain={chrome.retryRecoveredDraft} onDiscard={chrome.discardRecoveredDraft} restore />;
+    }
+    if (chrome.saveBar) {
+      return <SaveBar bar={chrome.saveBar} onTryAgain={chrome.tryAgain} onDiscard={chrome.discardUnsaved}
+        className={chrome.isConflictExhausted ? 'border-border bg-muted/40 text-foreground' : undefined} />;
+    }
+    // Preserve the narrow fallback surfaces for callers that provide raw chrome fields only.
+    return conflictBanner ?? incompatibleBanner ?? watchdogBanner ?? recoveryBanner;
+  };
+  const saveSurface = renderSaveSurface();
+
   /** The timeline region, contained so a render throw under it cannot take the
    *  toolbar (and therefore undo) down with it. Shared by all three layout
    *  branches — the boundary is per-branch instance, which is what we want: a
@@ -799,7 +907,24 @@ function TimelineEditorShellCoreComponent({
    *  payload and a blank editor whose badge claims `saved`. */
   const timelineRegion = (
     <>
-      {chrome.saveBar ? <SaveBar bar={chrome.saveBar} onTryAgain={chrome.tryAgain} onDiscard={chrome.discardUnsaved} /> : null}
+      {chrome.parkedDrops?.map((drop) => (
+        <SaveBar key={drop.id} bar={{ kind: 'refused', headline: `${drop.fileName} was not added: ${drop.reason}`, action: 'pending' }}
+          onTryAgain={drop.tryAgain} onDiscard={drop.discard} />
+      ))}
+      {saveSurface}
+      {!saveSurface && !showConflictDialog && !chrome.saveBar && !chrome.permanentSaveRejection ? <TimelineSaveNotice /> : null}
+      <AlertDialog open={showConflictDialog} onOpenChange={(open) => { if (!open) conflict.setOpen(false); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>This timeline changed somewhere else</AlertDialogTitle>
+            <AlertDialogDescription>{TIMELINE_CONFLICT_SENTENCE}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={conflict.discardAndReload}>{TIMELINE_CONFLICT_USE_LATEST}</AlertDialogCancel>
+            <AlertDialogAction onClick={conflict.keepLocalChanges}>{TIMELINE_CONFLICT_KEEP_MINE}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       {chrome.loadError && !(recoveryCardShowing && hasLoadedTimeline) ? (
         // The hosted build's "Astrid stopped" / "restarted" card already says what to do about the same failure.
         recoveryCardShowing ? null : <TimelineLoadErrorCard message={chrome.loadError.message} onRetry={chrome.retryLoad} />

@@ -197,7 +197,7 @@ describe('useTimelineCommit — delete-shot / auto-restore regression', () => {
           state: { state: 'present', value: Reflect.get(clip, key) },
         })),
         { kind: 'field', ref: 'parent', path: ['config', 'output', 'fps'], state: { state: 'present', value: 30 } },
-        { kind: 'field', ref: 'parent', path: ['config', 'registry', 'assets', 'p1-video'], state: { state: 'present', value: registry.assets['p1-video'] } },
+        { kind: 'field', ref: 'parent', path: ['config', 'registry', 'assets', 'p1-video', 'duration'], state: { state: 'present', value: registry.assets['p1-video'].duration } },
         { kind: 'collection', ref: 'parent', path: ['config', 'clips'], members: [clip.id], order: [clip.id] },
         { kind: 'field', ref: 'parent', path: ['config', 'pinnedShotGroups'], state: { state: 'absent' } },
       ]);

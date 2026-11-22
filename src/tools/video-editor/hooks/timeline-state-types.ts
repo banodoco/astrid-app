@@ -67,7 +67,7 @@ export type TimelineUploadAsset = (
 ) => Promise<{ assetId: string; entry: AssetRegistryEntry }>;
 export type TimelineUploadFiles = (files: File[]) => Promise<void>;
 export type TimelineInvalidateAssetRegistry = () => Promise<void>;
-export type TimelineReloadFromServer = (options?: { clearDraft?: boolean; preserveDraft?: boolean; discardRefusedSave?: boolean }) => Promise<void>;
+export type TimelineReloadFromServer = (options?: { clearDraft?: boolean; preserveDraft?: boolean; discardRefusedSave?: boolean; recoverySnapshot?: import('@/tools/video-editor/data/timelineDraftIndexedDb.ts').TimelineDraftRecord | null }) => Promise<void>;
 export type TimelineRetrySaveAfterConflict = () => Promise<void>;
 export type TimelineStartRender = () => Promise<void>;
 export type TimelineJumpToCheckpoint = (checkpointId: string) => void;

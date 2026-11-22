@@ -229,9 +229,7 @@ describe('local save recovery basis refusals', () => {
     env.send.mockImplementationOnce(async (request, key) => {
       expect([request, key]).toEqual(exact);
       expect(request).toMatchObject({ base_revision_id: h1.revisionId, base_publication_id: h1.publicationId });
-      expect(env.prepareDisplay.mock.lastCall).toEqual([{ head: h1,
-        canonicalDocument: acceptedA.canonicalDocument, graph: acceptedA.graph }]);
-      expect(reopened.getDocument()).toEqual(acceptedA.canonicalDocument);
+      // The accepted document is taken when the queue drains; the send itself reads only the stored record.
       expect(() => reopened.append({ before: toOutboxJson(acceptedA.canonicalDocument),
         after: toOutboxJson(afterB), label: 'C' })).toThrow('revalidation');
       return acceptedB;

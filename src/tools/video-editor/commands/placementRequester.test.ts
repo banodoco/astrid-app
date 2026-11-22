@@ -520,7 +520,8 @@ describe('bounded automatic placement requester', () => {
       expect((await env.requester(false).request(box, 'request', input)).status).toBe('manual');
       expect((await box.read()).intents).toEqual([]);
     });
-    await env.storage().create(scope, async () => {});
+    // An owner with a queued intent and no continuation (an owner with nothing at all is removed when its claim ends).
+    await env.storage().create(scope, async (box) => { await box.append({ fixture: 'unbound' }, { head }); });
     const results = await env.requester(false).recover();
     expect(results).toHaveLength(2);
     expect(results.map((v) => v.status)).toEqual(['manual', 'manual']);

@@ -94,6 +94,20 @@ describe('withDefaultTimelineOutput', () => {
     expect(result.output.background_scale).toBe(1.5);
   });
 
+  it('projects an authored rational frame rate without changing the source output', () => {
+    const authored = {
+      output: { fps: { numerator: 30_000, denominator: 1_001 } },
+      tracks: [{ id: 'V1', kind: 'visual' as const }],
+      clips: [{ id: 'opening', track: 'V1', at: 0, asset: 'image' }],
+    };
+    const before = structuredClone(authored);
+
+    const display = withDefaultTimelineOutput(authored as unknown as Parameters<typeof withDefaultTimelineOutput>[0]);
+
+    expect(display.output).toMatchObject({ resolution: '1280x720', fps: 30_000 / 1_001 });
+    expect(authored).toEqual(before);
+  });
+
   it('preserves zero fps as explicit value', () => {
     const result = withDefaultTimelineOutput({
       output: { fps: 0 },

@@ -26,6 +26,8 @@ export interface TimelineDraftRecord {
    * draft written by a newer edit (including undo/redo).
    */
   ownerId?: string;
+  /** Durable local save owner, when the draft mirrors an outbox. */
+  outboxOwnerId?: string;
   updatedAt: string;
   baseHeadRevisionId?: string | null;
   /** Scope evidence for immutable-head recovery; legacy unscoped heads are untrusted. */
@@ -40,6 +42,8 @@ export interface TimelineDraftRecoveryMetadata {
   recoveryKey?: string;
   /** Compare-and-delete owner for editor save acknowledgements. */
   ownerId?: string;
+  /** Durable local save owner, when the draft mirrors an outbox. */
+  outboxOwnerId?: string;
   baseHeadRevisionId?: string | null;
   baseHeadProjectId?: string;
   baseHeadTimelineId?: string;
@@ -132,6 +136,7 @@ function createDraftRecord(
     baseVersion,
     updatedAt: new Date().toISOString(),
     ...(recoveryMetadata.ownerId === undefined ? {} : { ownerId: recoveryMetadata.ownerId }),
+    ...(recoveryMetadata.outboxOwnerId === undefined ? {} : { outboxOwnerId: recoveryMetadata.outboxOwnerId }),
     ...(recoveryMetadata.baseHeadRevisionId !== undefined
       ? { baseHeadRevisionId: recoveryMetadata.baseHeadRevisionId }
       : {}),
@@ -230,6 +235,22 @@ export async function loadTimelineDraft(
   });
   database.close();
   return record ?? null;
+}
+
+/** An outbox owner may be referenced by either an editor or an occurrence's recovery key. */
+export async function hasOutboxRecoveryDraft(ownerId: string): Promise<boolean> {
+  const database = await openDatabase();
+  try {
+    return await new Promise<boolean>((resolve, reject) => {
+      const transaction = database.transaction(DRAFT_STORE_NAME, 'readonly');
+      const request = transaction.objectStore(DRAFT_STORE_NAME).getAll();
+      request.addEventListener('error', () => reject(request.error));
+      request.addEventListener('success', () => resolve((request.result as TimelineDraftRecord[])
+        .some((draft) => draft.outboxOwnerId === ownerId)));
+    });
+  } finally {
+    database.close();
+  }
 }
 
 export async function clearTimelineDraft(timelineId: string, expectedOwnerId?: string): Promise<void> {
@@ -414,7 +435,7 @@ export async function reconcileTimelineDraftHeadMarker(
 /** Clear only the recovery snapshot observed by an explicit reload/discard. */
 export async function clearTimelineDraftIfSnapshotMatches(
   recoveryKey: string,
-  snapshot: Pick<TimelineDraftRecord, 'updatedAt' | 'draftIdentity'>,
+  snapshot: Pick<TimelineDraftRecord, 'updatedAt' | 'draftIdentity' | 'ownerId'>,
 ): Promise<boolean> {
   if (typeof indexedDB === 'undefined') return false;
   const database = await openDatabase();
@@ -425,8 +446,7 @@ export async function clearTimelineDraftIfSnapshotMatches(
     let matched = false;
     request.addEventListener('success', () => {
       const current = request.result as TimelineDraftRecord | undefined;
-      if (current?.updatedAt === snapshot.updatedAt
-        && current.draftIdentity === snapshot.draftIdentity) {
+      if (current && JSON.stringify(current) === JSON.stringify(snapshot)) {
         matched = true;
         store.delete(buildKey(recoveryKey));
       }

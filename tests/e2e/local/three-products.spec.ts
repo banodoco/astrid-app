@@ -362,6 +362,105 @@ async function expectSameRealm(page: Page, harness: DirectHarness, astrid: Astri
 /** The transition control of the clip panel, found by its label (the panel's selects carry no accessible name). */
 const transitionSelect = (page: Page): Locator => page.getByText('Transition', { exact: true }).locator('xpath=following::*[@role="combobox"][1]');
 
+// DIAGNOSTIC ONLY: attach allowlisted transition scalars; never attach network bodies or arbitrary DOM.
+function diagnosticTransition(value: any): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object') return null;
+  const result: Record<string, unknown> = {};
+  for (const key of ['id', 'type']) if (typeof value[key] === 'string') {
+    result[key] = /^(cross-?fade|fade)$/.test(value[key]) ? value[key] : '<other>';
+  }
+  for (const key of ['duration', 'durationFrames']) if (typeof value[key] === 'number') result[key] = value[key];
+  return result;
+}
+async function attachDiagnostic(name: string, data: unknown): Promise<void> {
+  try { await test.info().attach(name, { body: Buffer.from(JSON.stringify(data, null, 2)), contentType: 'application/json' }); }
+  catch (error) { console.log(`DIAG ${name} unavailable`, error instanceof Error ? error.name : 'error'); }
+}
+async function diagnoseTransitionControl(page: Page, name: string, openOptions: boolean): Promise<void> {
+  const data: Record<string, unknown> = { options: 'not opened' };
+  const control = transitionSelect(page).first();
+  try {
+    data.state = await control.evaluate((node) => {
+      const safe = (v: unknown) => typeof v === 'string' && /^(cross-?fade|fade|__none__|None)$/.test(v) ? v : '<other>';
+      let fiber = (node as any)[Object.keys(node).find((key) => key.startsWith('__reactFiber$')) ?? ''];
+      let clip: any = null; let selectValue: unknown = null;
+      for (let depth = 0; fiber && depth < 60; depth++, fiber = fiber.return) {
+        const props = fiber.memoizedProps;
+        if (selectValue === null && typeof props?.value === 'string') selectValue = safe(props.value);
+        if (props?.clip && typeof props.clip === 'object' && typeof props.clip.id === 'string') { clip = props.clip; break; }
+      }
+      const t = clip?.transition; const transition: Record<string, unknown> = {};
+      if (t && typeof t === 'object') {
+        for (const key of ['id', 'type']) if (typeof t[key] === 'string') transition[key] = safe(t[key]);
+        for (const key of ['duration', 'durationFrames']) if (typeof t[key] === 'number') transition[key] = t[key];
+      }
+      const clipId = clip ? (/^(f2-transition-clip|f2-app-clip)$/.test(clip.id) ? clip.id : '<other>') : null;
+      return { renderedText: /cross[\s-]?fade/i.test(node.textContent ?? '') ? 'crossfade' : safe(node.textContent?.trim()),
+        ariaExpanded: node.getAttribute('aria-expanded'), selectValue, clipFound: !!clip, clipId,
+        transitionPresent: !!clip && Object.hasOwn(clip, 'transition'), transition: t ? transition : null };
+    }, undefined, { timeout: 3000 });
+  } catch (error) { data.stateError = error instanceof Error ? error.name : 'error'; }
+  if (openOptions) {
+    try {
+      await control.click({ timeout: 3000 });
+      data.options = await page.getByRole('option').evaluateAll((nodes) => nodes.map((node) => ({
+        label: /cross[\s-]?fade/i.test(node.textContent ?? '') ? 'crossfade' : '<other>',
+        value: (() => {
+          const key = Object.keys(node).find((candidate) => candidate.startsWith('__reactFiber$'));
+          let fiber = key ? (node as any)[key] : null; let value: unknown = node.getAttribute('data-value');
+          for (let depth = 0; !value && fiber && depth < 8; depth++, fiber = fiber.return) value = fiber.memoizedProps?.value;
+          return typeof value === 'string' && /^(cross-?fade|fade|__none__)$/.test(value) ? value : '<other-or-unavailable>';
+        })(),
+      })));
+    } catch (error) { data.optionsError = error instanceof Error ? error.name : 'error'; }
+    finally { try { await page.keyboard.press('Escape'); } catch { /* Page may have closed. */ } }
+  }
+  await attachDiagnostic(name, data);
+}
+async function diagnoseRecovery(page: Page, name: string): Promise<void> {
+  const data: Record<string, unknown> = {};
+  try {
+    data.roles = await page.evaluate(() => Array.from(document.querySelectorAll('[role="alert"], [role="status"], [role="alertdialog"]'))
+      .filter((node) => { const rect = node.getBoundingClientRect(); return rect.width > 0 && rect.height > 0; })
+      .slice(0, 10).map((node) => ({
+        role: node.getAttribute('role'),
+        text: /You have unsaved changes/i.test(node.textContent ?? '') ? 'You have unsaved changes'
+          : /This timeline changed somewhere else/i.test(node.textContent ?? '') ? 'This timeline changed somewhere else' : '<other>',
+        buttons: Array.from(node.querySelectorAll('button')).slice(0, 10).map((button) => {
+          const text = button.textContent?.trim() ?? '';
+          const style = getComputedStyle(button); const rect = button.getBoundingClientRect();
+          return { label: /^(Save them|Try again|Restore|Discard|Keep my changes|Use latest version)$/.test(text) ? text : '<other>',
+            visible: rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none',
+            enabled: !button.disabled && button.getAttribute('aria-disabled') !== 'true' };
+        }),
+      })));
+  } catch (error) { data.rolesError = error instanceof Error ? error.name : 'error'; }
+  await attachDiagnostic(name, data);
+  // Screenshot a synthetic card built solely from the allowlisted JSON above; it contains no raw page content.
+  try {
+    await page.evaluate((roles) => {
+      const card = document.createElement('div'); card.setAttribute('data-diag-recovery-card', 'true');
+      Object.assign(card.style, { position: 'fixed', top: '8px', left: '8px', zIndex: '2147483647',
+        background: '#fff', color: '#111', padding: '12px', width: '400px', font: '14px sans-serif' });
+      const heading = document.createElement('strong'); heading.textContent = 'Sanitized diagnostic: recovery/status'; card.appendChild(heading);
+      const rows = Array.isArray(roles) ? roles : [];
+      if (!rows.length) { const row = document.createElement('div'); row.textContent = 'No visible recovery/status roles'; card.appendChild(row); }
+      for (const item of rows) {
+        const row = document.createElement('div'); row.textContent = `${item.role}: ${item.text}`; card.appendChild(row);
+        for (const button of item.buttons) {
+          const line = document.createElement('div'); line.textContent = `  ${button.label} — visible: ${button.visible}, enabled: ${button.enabled}`; card.appendChild(line);
+        }
+      }
+      document.body.appendChild(card);
+    }, data.roles as any);
+    await test.info().attach(`${name}-sanitized-card`, {
+      body: await page.locator('[data-diag-recovery-card="true"]').screenshot({ timeout: 3000 }), contentType: 'image/png',
+    });
+  } catch (error) { await attachDiagnostic(`${name}-screenshot`, { unavailable: error instanceof Error ? error.name : 'error' }); }
+  finally { try { await page.locator('[data-diag-recovery-card="true"]').evaluateAll((nodes) => nodes.forEach((node) => node.remove())); } catch { /* Page may have closed. */ } }
+
+}
+
 async function selectClip(page: Page, clipId: string) {
   await page.locator(`[data-clip-id="${clipId}"]`).first().click();
 }
@@ -526,6 +625,12 @@ test('concurrent edit: the App\'s acknowledgement is lost, the agent publishes, 
   expect(stateB.parentClips[seed3.transitionClipId].transition.id).toMatch(/cross[\s-]?fade/i);
   expect(stateB.parentClips[seed3.transitionClipId].transition).toBeTruthy();
 
+  await attachDiagnostic('diag-b-transition-mirrors', {
+    topLevel: diagnosticTransition((stateB.parent.clips as any[])?.find((clip) => clip.id === seed3.transitionClipId)?.transition),
+    config: diagnosticTransition((stateB.parent.config?.clips as any[])?.find((clip) => clip.id === seed3.transitionClipId)?.transition),
+  });
+  await diagnoseTransitionControl(page, 'diag-before-keep', false);
+
   // One publication per retried save: A was replayed under its own key and made exactly one revision; the agent's publication made one.
   const revisions = (await allRevisions(harness, seed3)).map((revision) => revision.revision_id);
   expect(revisions.length, 'two new revisions: A and B').toBe(revisionsBefore + 2);
@@ -544,6 +649,7 @@ test('concurrent edit: the App\'s acknowledgement is lost, the agent publishes, 
   await expect(conflict).toHaveCount(0, CEILING);
   await expect(firstTrackName(page)).toHaveValue(stateB.trackLabel!);
   await selectClip(page, seed3.transitionClipId);
+  await diagnoseTransitionControl(page, 'diag-after-keep', true);
   await expect(transitionSelect(page)).toContainText(/cross[\s-]?fade/i, CEILING);
   const kept = await timelineDraft(page, seed3.timelineId);
   expect(kept?.draft).toEqual(draftC.draft);
@@ -3111,6 +3217,7 @@ nativeNoneTest('M2 native None bulk: one original-basis atomic clear preserves u
   // The single native owner is recovered automatically. Its rejected draft remains durable;
   // rollback shows the Agent's canonical partial clear, and Save them reopens the refusal.
   const recovery = page.getByRole('alert').filter({ hasText: 'You have unsaved changes' });
+  await diagnoseRecovery(page, 'diag-bulk-before-wait');
   await expect(recovery).toBeVisible(CEILING);
   expect(await timelineDraft(page, seed3.timelineId)).toEqual(retainedDraft);
   for (const id of ids) {
@@ -3118,6 +3225,7 @@ nativeNoneTest('M2 native None bulk: one original-basis atomic clear preserves u
     await page.getByRole('tab', { name: 'Effects', exact: true }).click();
     await expect(transitionSelect(page)).toContainText(id === seed3.appClipId ? 'None' : /cross[\s-]?fade/i);
   }
+  await diagnoseRecovery(page, 'diag-bulk-before-click');
   await recovery.getByRole('button', { name: 'Save them' }).click();
   await expect(page.getByRole('alertdialog', { name: CONFLICT_TITLE })).toBeVisible(CEILING);
   expect(await timelineDraft(page, seed3.timelineId)).toEqual(retainedDraft);

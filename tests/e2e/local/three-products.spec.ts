@@ -474,7 +474,7 @@ test('concurrent edit: the App\'s acknowledgement is lost, the agent publishes, 
   await agent.edit('--clip', seed3.agentClipId, '--extend', '1');
   await agent.edit('--clip', seed3.agentClearClipId, '--clear-asset');
   // A competing transition change on the clip the App clears below: B's publication conflicts with C.
-  await agent.edit('--clip', seed3.transitionClipId, '--set', 'transition={"type":"crossfade","duration":1.2}');
+  await agent.edit('--clip', seed3.transitionClipId, '--set', 'transition={"type":"cross-fade","duration":1.2}');
   const published = await agent.commit('agent: extend and clear', 'f2-case2');
   expect(published.old_head, 'the agent built on the App\'s save').toBe(headA);
   const headB = published.new_head;
@@ -1304,7 +1304,7 @@ type GestureExpectation = { kind: 'move'; clipId: string; trackId: string } | { 
 /**
  * The exact guard set a mounted drag-move must carry, re-derived independently from the authored parent payload the
  * gesture started from (the contract of the move branch in timelineLocalSaveHandoff.ts: selected clip timing fields,
- * output fps / theme canvas fallback, registry asset, the moved track kind, pinnedShotGroups, the clip collection
+ * output fps / theme canvas fallback, registry asset duration, the moved track kind, pinnedShotGroups, the clip collection
  * order and membership, and for every other clip its track, plus timing fields and asset for same-track siblings).
  */
 function expectedMoveReads(parent: Record<string, any>, clipId: string, trackId: string): Array<Record<string, unknown>> {
@@ -1321,7 +1321,8 @@ function expectedMoveReads(parent: Record<string, any>, clipId: string, trackId:
   };
   const timing = (item: Record<string, any>) => ['id', 'track', 'at', 'clipType', 'hold', 'from', 'to', 'speed', 'asset']
     .map((key) => read(item, key, [...clipPath, `id:${item.id}`]));
-  const assetRead = (item: Record<string, any>) => typeof item.asset === 'string' ? [readPath(parent.registry, ['assets', item.asset], ['config', 'registry'])] : [];
+  // REVIEW: Lead ruling 21/22 Nov: App #308 (25c5672d545) narrows the consulted registry read to duration (or its nearest absent ancestor).
+  const assetRead = (item: Record<string, any>) => typeof item.asset === 'string' ? [readPath(parent.registry, ['assets', item.asset, 'duration'], ['config', 'registry'])] : [];
   const clip = clips.find((item) => item.id === clipId)!;
   expect(clip, `the moved clip ${clipId} is in the authored parent`).toBeTruthy();
   expect(clip.track).toBe(trackId);
@@ -2910,10 +2911,10 @@ nativeNoneTest('M2 native None single: ordinary default crossfade clears raw mir
   journey.facts.sameRealm = await expectSameRealm(page, harness, astrid);
   const before = await history(harness, seed3);
   const original = await revisionState(harness, seed3, before.head.revision_id);
-  expect(original.parentClips[seed3.transitionClipId].transition).toEqual({ type: 'crossfade', duration: 0.5 });
+  expect(original.parentClips[seed3.transitionClipId].transition).toEqual({ type: 'cross-fade', duration: 0.5 });
   await selectClip(page, seed3.transitionClipId);
   await page.getByRole('tab', { name: 'Effects', exact: true }).click();
-  await expect(transitionSelect(page)).toContainText('crossfade');
+  await expect(transitionSelect(page)).toContainText(/cross[\s-]?fade/i);
   await setTransitionToNone(page, seed3.transitionClipId);
   await expect.poll(() => wire.posts.length, CEILING).toBe(1);
   const cleared = accepted(wire.posts[0]);
@@ -2983,7 +2984,7 @@ nativeNoneTest('M2 native None single: ordinary default crossfade clears raw mir
   await openSeededTimeline(page, harness);
   await selectClip(page, seed3.transitionClipId);
   await page.getByRole('tab', { name: 'Effects', exact: true }).click();
-  await expect(transitionSelect(page)).toContainText('crossfade');
+  await expect(transitionSelect(page)).toContainText(/cross[\s-]?fade/i);
   const unavailableTarget = await expectFreshPreviewUnavailable(page, astrid, harness, seed3, pinOf(undone).revision_id);
   expect((await revisionState(harness, seed3, pinOf(undone).revision_id)).parent).toEqual(original.parent);
   await expectOpaqueDataKept(harness, seed3);
@@ -3003,7 +3004,7 @@ nativeNoneTest('M2 native None bulk: one original-basis atomic clear preserves u
   const before = await history(harness, seed3);
   const original = await revisionState(harness, seed3, before.head.revision_id);
   const ids = [seed3.appClipId, seed3.transitionClipId];
-  expect(original.parentClips[seed3.appClipId].transition.revision).toBe('native-none-unknown-revision');
+  expect(original.parentClips[seed3.appClipId].transition.params.fixtureMetadata.revision).toBe('native-none-unknown-revision');
   expect(Object.hasOwn(original.parentClips[seed3.appClipId].transition.params, '__proto__')).toBe(true);
   await bulkTransitionNone(page, seed3);
   await expect.poll(() => wire.posts.length, CEILING).toBe(1);
@@ -3054,7 +3055,7 @@ nativeNoneTest('M2 native None bulk: one original-basis atomic clear preserves u
   expect(undone.data.canonical_document.parent_revision.payload).toEqual(original.parent);
   const restored = (undone.data.canonical_document.parent_revision.payload.clips as Array<Record<string, any>>)
     .find((clip) => clip.id === seed3.appClipId)!;
-  expect(Object.hasOwn(restored.transition, '__proto__')).toBe(true);
+  expect(Object.hasOwn(restored.transition.params.fixtureMetadata, '__proto__')).toBe(true);
   expect(Object.hasOwn(restored.transition.params, '__proto__')).toBe(true);
   expect(Object.keys(restored.transition)).toEqual(Object.keys(original.parentClips[seed3.appClipId].transition));
   await expectImmutableClosure(harness, seed3, undone);

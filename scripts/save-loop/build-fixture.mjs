@@ -274,6 +274,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from astrid.sdk import AstridClient
 from astrid.sdk.timeline.api import Timeline
+from astrid.core.timeline.track_appearance import stamp_new_track_appearance
 
 cfg = json.load(open(os.environ['SAVE_LOOP_CONFIG_PATH'], encoding='utf-8'))
 project = cfg['project_id']
@@ -490,8 +491,9 @@ def populate(timeline, *, control=False):
                 owner = f'occurrence:fixture-occurrence-{i:02d}'
                 def child_tracks(t):
                     for track, kind in (('LV', 'visual'), ('LA', 'audio')):
+                        row = stamp_new_track_appearance({'id': track, 'kind': kind, 'label': track})
                         t.command({'schema_version': 1, 'op': 'track.create', 'version': '1',
-                                   'select': owner, 'args': {'row': {'id': track, 'kind': kind, 'label': track}},
+                                   'select': owner, 'args': {'row': row},
                                    'intent': {}}, label='Create child track')
                 commit_batch(tl, timeline, f'Add child tracks {i}', f'p77-{timeline}-child-tracks-{i}', child_tracks, 2)
                 for start in range(0, 32, 8):
@@ -572,6 +574,8 @@ if large_shots:
     per_shot = []
     for i, shot in enumerate(shots[46:], start=46):
         occurrence = next(row for row in placement_rows(heavy_doc) if row.get('occurrence_id') == f'fixture-occurrence-{i:02d}')
+        if occurrence.get('duration_ms') != 480000:
+            raise RuntimeError(f'large shot {i} occurrence duration differs from 480000 ms')
         shot_revision = next(row for row in heavy_doc['shot_revisions']
                              if row['shot_id'] == shot['shot_id'] and row['revision_id'] == occurrence['shot_revision_id'])
         internal = next(row['payload'] for row in heavy_doc['internal_timeline_revisions']
@@ -589,9 +593,14 @@ if large_shots:
             raise RuntimeError(f'large shot {i} child identities or durations differ')
         if {row.get('id') for row in internal.get('tracks', [])} != {'LV', 'LA'}:
             raise RuntimeError(f'large shot {i} child tracks differ')
+        if any(row.get('app', {}).get('scaleAppliesToPositionedClips') is not True
+               or type(row.get('app', {}).get('clipPlacementVersion')) is not int
+               or row['app']['clipPlacementVersion'] != 1 for row in internal['tracks']):
+            raise RuntimeError(f'large shot {i} child track appearance markers differ')
         if canonical_media_ids(internal) != {media_selections[k][-1]['object_id'] for k in ('video', 'audio')}:
             raise RuntimeError(f'large shot {i} media identities differ')
         per_shot.append({'shot_id': shot['shot_id'], 'occurrence_id': occurrence['occurrence_id'],
+                         'occurrence_duration_ms': occurrence['duration_ms'],
                          'child_clips': len(children), 'child_tracks': len(internal['tracks']), 'child_hold_seconds': 30})
     large_measurement = {'shots': per_shot, 'child_clip_count': sum(row['child_clips'] for row in per_shot),
                          'child_commit_count': sum('child' in row['label'].lower() for row in receipts),

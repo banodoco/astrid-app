@@ -26,6 +26,7 @@ const root = process.env.SAVE_LOOP_ROOT;
 const baseUrl = process.env.SAVE_LOOP_BASE_URL;
 const variant = process.env.SAVE_LOOP_VARIANT || 'standard';
 const largeShots = variant === 'large-shots';
+const quickFixture = process.env.SAVE_LOOP_QUICK_FIXTURE === '1';
 const startedAt = Date.now();
 const scratch = path.resolve(process.env.SAVE_LOOP_SCRATCH || `${repo}.env/save-loop`);
 const clipTarget = Number(process.env.SAVE_LOOP_CLIPS || 616);
@@ -285,6 +286,7 @@ shots = cfg['shots']
 large_shots = cfg['large_shots']
 visual, audio = cfg['visual_tracks'], cfg['audio_tracks']
 count = cfg['clip_target']
+quick_fixture = cfg['quick_fixture']
 image_n, video_n = round(count * .25), round(count * .06)
 audio_n = count - image_n - video_n
 expected_object_ids = cfg['expected_object_ids']
@@ -393,7 +395,7 @@ def canonical_document_bytes(doc):
     return len(json.dumps(doc, sort_keys=True, separators=(',', ':'),
                           ensure_ascii=False, allow_nan=False).encode('utf-8'))
 
-batch_size = 12
+batch_size = 1 if quick_fixture else 12
 outbox_root = cfg['outbox_root']
 receipts = []
 
@@ -433,7 +435,7 @@ def populate(timeline, *, control=False):
         if (len(initial_tracks) != 2 or set(initial) != bootstrap_track_ids
                 or initial['V1'].get('kind') != 'visual' or initial['A1'].get('kind') != 'audio'):
             raise RuntimeError(f'expected Runtime bootstrap tracks V1 visual and A1 audio; got {initial_tracks!r}')
-        track_rows = [] if control else (
+        track_rows = [] if control or (quick_fixture and count == 0) else (
             [(track, 'visual') for track in visual if track not in initial]
             + [(track, 'audio') for track in audio if track not in initial])
         def make_tracks(t):
@@ -512,7 +514,9 @@ def populate(timeline, *, control=False):
         actual_tracks = root_tracks(document)
         visual_count = sum(row.get('kind') == 'visual' for row in actual_tracks)
         audio_count = sum(row.get('kind') == 'audio' for row in actual_tracks)
-        if not control and (len(actual_tracks) != 9 or visual_count != 6 or audio_count != 3
+        if not control and count == 0 and (len(actual_tracks) != 2 or {row.get('id') for row in actual_tracks} != bootstrap_track_ids):
+            raise RuntimeError(f'expected the two ordinary Runtime bootstrap tracks for an empty fixture; got {actual_tracks!r}')
+        if not control and count > 0 and (len(actual_tracks) != 9 or visual_count != 6 or audio_count != 3
                             or {row.get('id') for row in actual_tracks} != set(visual + audio)):
             raise RuntimeError(f'expected exactly 9 fixture tracks (6 visual, 3 audio); got {actual_tracks!r}')
         if control and (len(actual_tracks) != 2 or visual_count != 1 or audio_count != 1):
@@ -523,17 +527,18 @@ def populate(timeline, *, control=False):
         if missing_ids: raise RuntimeError(f'accepted Runtime document is missing {len(missing_ids)} expected media identities')
         unexpected_ids = sorted(actual_ids - required_ids)
         if unexpected_ids: raise RuntimeError(f'accepted Runtime document contains {len(unexpected_ids)} unexpected media identities')
-        clip_id = targets['video'][0]
-        clip = next((row for row in root_clips(document) if row.get('id') == clip_id), None)
-        if clip is None: raise RuntimeError(f'public SDK document has no clip {clip_id}')
-        initial = float(clip.get('at', 0))
         warm_times = []
-        for i in range(5):
-            target = initial + (1 / 30 if i % 2 == 0 else 0)
-            def move_clip(t, target=target): t.move(f'parent/clip:{clip_id}', target)
-            commit_batch(tl, timeline, 'Warm fixture clip move',
-                         f'p77-warm-move-{timeline}-{clip_id}-{i}', move_clip, 1)
-            warm_times.append(receipts[-1]['elapsed_ms'])
+        if targets['video']:
+            clip_id = targets['video'][0]
+            clip = next((row for row in root_clips(document) if row.get('id') == clip_id), None)
+            if clip is None: raise RuntimeError(f'public SDK document has no clip {clip_id}')
+            initial = float(clip.get('at', 0))
+            for i in range(5):
+                target = initial + (1 / 30 if i % 2 == 0 else 0)
+                def move_clip(t, target=target): t.move(f'parent/clip:{clip_id}', target)
+                commit_batch(tl, timeline, 'Warm fixture clip move',
+                             f'p77-warm-move-{timeline}-{clip_id}-{i}', move_clip, 1)
+                warm_times.append(receipts[-1]['elapsed_ms'])
         document = canonical_documents[timeline]
         actual_staged_track_count = len({row.get('id') for row in root_tracks(document)} - bootstrap_track_ids)
         if actual_staged_track_count != len(track_rows):
@@ -627,10 +632,12 @@ measurement = {
     'runtime_object_ids': sorted(canonical_media_ids(heavy_doc)),
     'heavy_warm_move_samples_ms': heavy_times,
     'one_clip_warm_move_samples_ms': control_times,
-    'heavy_warm_move_median_ms': statistics.median(heavy_times),
-    'one_clip_warm_move_median_ms': statistics.median(control_times),
-    'warm_move_median_ratio': statistics.median(heavy_times) / statistics.median(control_times),
-    'one_clip_document_bytes': control_bytes, 'one_clip_count': len(root_clips(control_doc)),
+    'heavy_warm_move_median_ms': statistics.median(heavy_times) if heavy_times else None,
+    'one_clip_warm_move_median_ms': statistics.median(control_times) if control_times else None,
+    'warm_move_median_ratio': (statistics.median(heavy_times) / statistics.median(control_times)
+                               if heavy_times and control_times else None),
+    'one_clip_document_bytes': None if quick_fixture and count == 0 else control_bytes,
+    'one_clip_count': None if quick_fixture and count == 0 else len(root_clips(control_doc)),
     'named': {'tracks': [{'id': row['id'], 'label': row.get('label', row['id']),
                           'kind': row['kind'], **({'role': row['role']} if 'role' in row else {})}
                          for row in root_tracks(heavy_doc) if row.get('id') in visual + audio],
@@ -652,7 +659,12 @@ async function main() {
   if (!['localhost', '127.0.0.1', '[::1]'].includes(origin.hostname))
     throw new Error('save-loop fixture creation requires the owned local isolated stack');
   if (origin.pathname !== '/' || origin.search || origin.hash) throw new Error('SAVE_LOOP_BASE_URL must be a local origin without a path or query');
-  if (!Number.isInteger(clipTarget) || clipTarget < 616) throw new Error('SAVE_LOOP_CLIPS must be an integer >= 616');
+  if (quickFixture) {
+    if (!Number.isInteger(clipTarget) || ![0, 10, 100].includes(clipTarget) || largeShots)
+      throw new Error('quick fixtures require standard variant and SAVE_LOOP_CLIPS of 0, 10, or 100');
+  } else if (!Number.isInteger(clipTarget) || clipTarget < 616) {
+    throw new Error('SAVE_LOOP_CLIPS must be an integer >= 616');
+  }
   const resolvedRoot = fs.realpathSync(root);
   const marker = path.join(resolvedRoot, '.sl1-stack-owned');
   if (resolvedRoot !== path.resolve(root) || !fs.existsSync(marker)
@@ -673,17 +685,17 @@ async function main() {
   assertDisk();
   const diskBefore = freeBytes();
   const mediaRoot = path.join(scratch, 'generated-media');
-  const images = await mediaPool({dir: path.join(mediaRoot, 'images'), prefix: 'image-', suffix: '.png', count: imageCount,
+  const images = imageCount === 0 ? [] : await mediaPool({dir: path.join(mediaRoot, 'images'), prefix: 'image-', suffix: '.png', count: imageCount,
     ffmpegArgs: pattern => ['-f', 'lavfi', '-i', `color=c=red:s=1920x1080:r=1:d=${imageCount}`,
       '-vf', "fps=1,hue=h='2*n'", '-frames:v', String(imageCount), '-start_number', '0', '-y', pattern]});
   stampGeneratedPngs(images);
-  const videos = await mediaPool({dir: path.join(mediaRoot, 'videos'), prefix: 'video-', suffix: '.mp4', count: videoCount,
+  const videos = videoCount === 0 ? [] : await mediaPool({dir: path.join(mediaRoot, 'videos'), prefix: 'video-', suffix: '.mp4', count: videoCount,
     ffmpegArgs: pattern => ['-f', 'lavfi', '-i', `color=c=red:s=1920x1080:r=30:d=${videoCount * 5}`,
       '-vf', "hue=h='2*n'", '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
       '-g', '30', '-force_key_frames', 'expr:gte(t,n_forced*5)', '-f', 'segment', '-segment_time', '5',
       '-segment_format', 'mp4', '-reset_timestamps', '1', '-y', pattern]});
   await stampGeneratedVideos(videos);
-  const audios = await mediaPool({dir: path.join(mediaRoot, 'audio'), prefix: 'audio-', suffix: '.wav', count: audioCount,
+  const audios = audioCount === 0 ? [] : await mediaPool({dir: path.join(mediaRoot, 'audio'), prefix: 'audio-', suffix: '.wav', count: audioCount,
     ffmpegArgs: pattern => ['-f', 'lavfi', '-i', `aevalsrc=sin(2*PI*(440+floor(t))*t):s=44100:d=${audioCount}`,
       '-f', 'segment', '-segment_time', '1', '-segment_format', 'wav', '-reset_timestamps', '1', '-y', pattern]});
   if (largeShots) {
@@ -716,7 +728,7 @@ async function main() {
     throw new Error(`expected ${clipTarget} unique generated media object identities; got ${expectedObjectIds.length}`);
   const dropFiles = images.slice(0, 3);
   const dropObjectIds = dropFiles.map(sha256ObjectId);
-  if (dropFiles.length !== 3 || dropObjectIds.some((id, index) => id !== objectIdsByKind.image[index]))
+  if (!quickFixture && (dropFiles.length !== 3 || dropObjectIds.some((id, index) => id !== objectIdsByKind.image[index])))
     throw new Error('drop file identities are not paired with their generated Runtime object IDs');
   assertDisk();
 
@@ -736,8 +748,9 @@ async function main() {
     if (findString(response, 'timeline_id') !== id) throw new Error(`Runtime did not confirm timeline id ${id}`);
   };
   await createTimeline(timelineId, 'Generated heavy timeline');
-  await createTimeline(oneClipTimelineId, 'One-clip timing control');
-  const shots = Array.from({length: 46}, (_, i) => ({
+  const buildControl = !quickFixture || clipTarget > 0;
+  if (buildControl) await createTimeline(oneClipTimelineId, 'One-clip timing control');
+  const shots = quickFixture ? [] : Array.from({length: 46}, (_, i) => ({
     shot_id: `fixture-shot-${nonce}-${String(i + 1).padStart(2, '0')}`,
     name: `Fixture shot ${String(i + 1).padStart(2, '0')}`,
   }));
@@ -767,7 +780,7 @@ async function main() {
   const media = {image: images, video: videos, audio: audios};
   const expectedObjectIdsByKind = objectIdsByKind;
   fs.writeFileSync(configPath, JSON.stringify({project_id: projectId, timeline_id: timelineId,
-    one_clip_timeline_id: oneClipTimelineId, clip_target: clipTarget, media, shots, large_shots: largeShots,
+    one_clip_timeline_id: oneClipTimelineId, clip_target: clipTarget, quick_fixture: quickFixture, media, shots, large_shots: largeShots,
     visual_tracks: visualTracks, audio_tracks: audioTracks, outbox_root: outboxRoot,
     expected_object_ids: expectedObjectIds, expected_object_ids_by_kind: expectedObjectIdsByKind}));
   fs.writeFileSync(scriptPath, sdkScript, {mode: 0o600});
@@ -807,31 +820,33 @@ async function main() {
     verified_object_id_count: headObjectIds.length, route: `/api/runtime${headRevisionRoute}`};
   assertDisk();
   const {named, ...measuredValues} = measurement;
-  const passed = measurement.clip_count >= clipTarget && measurement.document_bytes >= byteTarget
-    && measurement.warm_move_median_ratio >= ratioTarget;
+  const passed = quickFixture ? measurement.clip_count === clipTarget
+    : measurement.clip_count >= clipTarget && measurement.document_bytes >= byteTarget
+      && measurement.warm_move_median_ratio >= ratioTarget;
   const manifest = {
     schema_version: 1,
     variant,
     project_id: projectId,
     timeline_id: timelineId,
-    one_clip_timeline_id: oneClipTimelineId,
+    one_clip_timeline_id: buildControl ? oneClipTimelineId : null,
     tracks: {
       visual: named.tracks.filter(row => row.kind === 'visual'),
       audio: named.tracks.filter(row => row.kind === 'audio'),
-      occurrence_track_id: named.occurrences[0].track_id,
+      occurrence_track_id: named.occurrences[0]?.track_id ?? null,
     },
     clips: {
-      video: {primary: named.video[0], repeated_delete_and_split: named.video.slice(1, 10)},
-      audio: {primary: named.audio[0], additional: named.audio.slice(1, 10)},
-      image: named.image[0],
+      video: {primary: named.video[0] ?? null, repeated_delete_and_split: named.video.slice(1, 10)},
+      audio: {primary: named.audio[0] ?? null, additional: named.audio.slice(1, 10)},
+      image: named.image[0] ?? null,
       shot_occurrences: named.occurrences,
     },
     shots,
     media: {synthetic: true, asset_counts: {image: images.length, video: videos.length, audio: audios.length},
       retained_object_ids: parentObjectIds, drop_files: dropFiles,
       drop_object_ids: dropObjectIds},
-    measurement: {...measuredValues, targets: {clip_count: clipTarget, document_bytes: byteTarget,
-      warm_move_median_ratio: ratioTarget}, status: passed ? 'pass' : 'fail'},
+    measurement: {...measuredValues, targets: {clip_count: clipTarget,
+      document_bytes: quickFixture ? null : byteTarget,
+      warm_move_median_ratio: quickFixture ? null : ratioTarget}, status: passed ? (quickFixture ? 'quick-built' : 'pass') : 'fail'},
     live_proof: {stack_url: baseUrl, generated_at: new Date().toISOString(), second_machine: 'pending'},
   };
   if (largeShots) Object.assign(manifest.measurement.large_shots, {
@@ -843,8 +858,8 @@ async function main() {
   const manifestPath = path.join(scratch, `manifest-${projectId}.json`);
   fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
   console.log(`Manifest: ${manifestPath}`);
-  console.log(`Video target: ${named.video[0].clip_id}`);
-  console.log(`Audio target: ${named.audio[0].clip_id}`);
+  if (named.video[0]) console.log(`Video target: ${named.video[0].clip_id}`);
+  if (named.audio[0]) console.log(`Audio target: ${named.audio[0].clip_id}`);
   console.log(JSON.stringify(manifest.measurement, null, 2));
   if (!passed) throw new Error(`measured fixture misses target; use observed size/ratio to set SAVE_LOOP_CLIPS higher; manifest retained at ${manifestPath}`);
 }

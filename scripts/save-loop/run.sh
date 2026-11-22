@@ -3,13 +3,15 @@
 set -Eeuo pipefail
 umask 077
 APP="$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
-usage='Usage: SAVE_LOOP_CHROME=/absolute/path/to/chrome scripts/save-loop/run.sh [--variant large-shots]
+usage='Usage: SAVE_LOOP_CHROME=/absolute/path/to/chrome scripts/save-loop/run.sh [--variant large-shots | --quick-fixture 0|10|100]
 
-Creates a new isolated stack and synthetic fixture, runs the save-loop matrix,
-and stops the stack. Outputs are retained in the printed directory.'
+Creates a new isolated stack and synthetic fixture, then stops the stack.
+--quick-fixture builds only that fixture and skips the sweep. Outputs are retained in the printed directory.'
 if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then echo "$usage"; exit 0; fi
 variant=standard
+quick_fixture_size=
 if [[ $# == 2 && "$1" == --variant && "$2" == large-shots ]]; then variant=large-shots
+elif [[ $# == 2 && "$1" == --quick-fixture && "$2" =~ ^(0|10|100)$ ]]; then quick_fixture_size="$2"
 elif [[ $# != 0 ]]; then echo "$usage" >&2; exit 2; fi
 fail() { echo "STOP: $*" >&2; exit 1; }
 case "$(uname -s)" in Linux|Darwin) ;; *) fail 'Linux or macOS is required.' ;; esac
@@ -25,7 +27,11 @@ mkdir -p "$base"
 available_kib="$(df -Pk "$base" | awk 'NR == 2 {print $4}')"
 [[ "$available_kib" =~ ^[0-9]+$ ]] || fail 'Could not determine free disk space.'
 (( available_kib >= 25 * 1024 * 1024 )) || fail "At least 25 GiB free is required on $base."
-unset SAVE_LOOP_CLIPS SAVE_LOOP_DOCUMENT_BYTES SAVE_LOOP_COMMIT_RATIO SAVE_LOOP_RESULTS
+unset SAVE_LOOP_DOCUMENT_BYTES SAVE_LOOP_COMMIT_RATIO SAVE_LOOP_RESULTS
+if [[ -z "$quick_fixture_size" ]]; then unset SAVE_LOOP_CLIPS SAVE_LOOP_QUICK_FIXTURE; fi
 run_dir="$(mktemp -d "$base/run.XXXXXXXX")"
 echo "Run outputs: $run_dir"
+if [[ -n "$quick_fixture_size" ]]; then
+  exec env SL1_SCRATCH="$run_dir" SL1_ON_DEMAND=1 SAVE_LOOP_VARIANT=standard SAVE_LOOP_QUICK_FIXTURE=1 SAVE_LOOP_CLIPS="$quick_fixture_size" "$APP/scripts/save-loop/start-isolated-linux.sh"
+fi
 exec env SL1_SCRATCH="$run_dir" SL1_ON_DEMAND=1 SAVE_LOOP_VARIANT="$variant" "$APP/scripts/save-loop/start-isolated-linux.sh"

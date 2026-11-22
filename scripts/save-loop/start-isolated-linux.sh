@@ -376,6 +376,15 @@ if (names.length !== 1) throw new Error(`Expected one fixture manifest, found ${
 console.log(path.join(dir, names[0]));
 NODE
 )"
+  if [[ "${SAVE_LOOP_QUICK_FIXTURE:-0}" == 1 ]]; then
+    node --input-type=module - "$SCRATCH/status.json" "$variant" "$manifest" <<'NODE'
+import fs from 'node:fs';
+const [file, variant, manifest] = process.argv.slice(2);
+fs.writeFileSync(file, JSON.stringify({variant, status: 'quick-fixture-built', stage: 'fixture', manifest}) + '\n');
+NODE
+    echo "Quick fixture manifest: $manifest"
+    exit 0
+  fi
   node "$APP/scripts/save-loop/sweep.mjs" --manifest "$manifest" --results "$SCRATCH/results.jsonl" --versions "$SCRATCH/versions.json" &
   RUN_CHILD_PID=$!
   result=0

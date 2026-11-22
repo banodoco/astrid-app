@@ -24,6 +24,7 @@
 }
 @media (max-width: 760px) {
   .astrid-vision-hero-copy::before { content: none; }
+  .astrid-vision-planet-space { display: none; }
   .astrid-vision-planet-space { --planet-stage-unit: clamp(2px, .75vw, 3px); }
   .astrid-vision-planet-pin {
     top: 68px;

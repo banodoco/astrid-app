@@ -315,6 +315,47 @@ async function setupRefusedSave(status: number) {
 }
 
 describe('useTimelineSave — recovered draft durability', () => {
+  it('permits a guarded save while history is unavailable', async () => {
+    const lockDescriptor = Object.getOwnPropertyDescriptor(navigator, 'locks');
+    Object.defineProperty(navigator, 'locks', { configurable: true, value: {
+      request: async (_name: string, _options: unknown, work: (lock: object) => Promise<unknown>) => work({}),
+    } });
+    const head = { projectId: 'project-commit', timelineId: 'timeline-1', headRevisionId: 'r0', headPublicationId: 'p0' };
+    const config = createDefaultTimelineConfig();
+    const registry = { assets: {} };
+    const response = acceptedCommit({ revision_id: 'r1', publication_id: 'p1' }, { revision_id: 'r0', publication_id: 'p0' }, { timelineId: 'timeline-1' });
+    const document = acceptedCommit({ revision_id: 'r0', publication_id: 'p0' }, { revision_id: 'r0', publication_id: 'p0' }, { timelineId: 'timeline-1' }).data.canonical_document;
+    document.parent_revision.payload = { config, clips: [], registry, occurrences: [] };
+    document.parent_revision.content_digest = fixtureDigest(document.parent_revision.payload);
+    const initial = { head: { revisionId: 'r0', publicationId: 'p0' }, canonicalDocument: document };
+    const data = await buildTimelineData(config, registry, undefined, 1, undefined, head);
+    const loadHistory = vi.fn(async () => { throw new Error('history unavailable'); });
+    const send = vi.fn<NonNullable<DataProvider['commitTimeline']>>(async () => {
+      const next = structuredClone(document);
+      next.parent_revision.revision_id = 'r1';
+      (next.parent_revision.payload.config as typeof config).output.file = 'changed.mp4';
+      next.parent_revision.content_digest = fixtureDigest(next.parent_revision.payload);
+      response.data.canonical_document = next;
+      return { response, accepted: { revisionId: 'r1', publicationId: 'p1' }, canonicalDocument: next, graph: {}, receipt: response.receipt };
+    });
+    const harness = setup(async () => { throw new Error('legacy save'); }, undefined, { data, loadBasis: async () => initial,
+      capabilities: { loadTimelineCommandHistory: loadHistory, commitTimeline: send,
+        getRecoverableIdentity: async () => ({ actorId: 'actor', realmId: 'realm' }) } });
+    try {
+      await vi.waitFor(() => expect(harness.hook.result.current.isTimelineEditingReady()).toBe(true));
+      const next = await buildTimelineData({ ...config, output: { ...config.output, file: 'changed.mp4' } }, registry, undefined, 1, undefined, head);
+      await act(async () => { harness.hook.result.current.commitData(next, { save: true }); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(600); });
+      await vi.waitFor(() => expect(harness.hook.result.current.localSaveState?.status).toBe('saved'));
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(send.mock.calls[0][0]).toMatchObject({ base_revision_id: 'r0', base_publication_id: 'p0' });
+      expect(loadHistory).not.toHaveBeenCalled();
+    } finally {
+      harness.hook.unmount();
+      if (lockDescriptor) Object.defineProperty(navigator, 'locks', lockDescriptor);
+      else Reflect.deleteProperty(navigator, 'locks');
+    }
+  });
   it('clears a bootstrap error to loading while a restarted local owner becomes ready', async () => {
     const lockDescriptor = Object.getOwnPropertyDescriptor(navigator, 'locks');
     Object.defineProperty(navigator, 'locks', { configurable: true, value: {

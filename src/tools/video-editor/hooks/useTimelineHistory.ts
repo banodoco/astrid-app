@@ -48,7 +48,7 @@ export interface UseTimelineHistoryArgs {
    */
   pendingOpsRef: MutableRefObject<number>;
   editability?: TimelineEditability;
-  remoteHistory?: Pick<TimelineLocalSaveHandoff, 'remoteHistoryAvailable' | 'canUndo' | 'canRedo' | 'undo' | 'redo'>;
+  remoteHistory?: Pick<TimelineLocalSaveHandoff, 'remoteHistoryAvailable' | 'refreshHistory' | 'canUndo' | 'canRedo' | 'undo' | 'redo'>;
 }
 
 export interface UseTimelineHistoryResult {
@@ -74,6 +74,10 @@ export interface UseTimelineHistoryResult {
 
 function cloneConfig(config: TimelineConfig): TimelineConfig {
   return structuredClone(config);
+}
+
+function historyBasis(data: TimelineData | null): string | null {
+  return data ? JSON.stringify([data.head, data.config, data.registry, data.sourceItemsBySchemaRef]) : null;
 }
 
 function buildSnapshot(currentData: TimelineData): UndoSnapshot {
@@ -131,9 +135,11 @@ export function useTimelineHistory({
   const [canRedo, setCanRedo] = useState(false);
   const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([]);
   const [canonicalHistory, setCanonicalHistory] = useState<readonly CanonicalShotCompositionHistoryEntry[]>([]);
-  const [canonicalHistoryError, setCanonicalHistoryError] = useState<string | null>(null);
+  const [canonicalHistoryError, setCanonicalHistoryError] = useState<string | null>(remoteHistory ? 'History has not been loaded.' : null);
   const [restoringCanonicalRevisionId, setRestoringCanonicalRevisionId] = useState<string | null>(null);
   const canonicalHistoryRequestRef = useRef(0);
+  const canonicalHistoryBasisRef = useRef<TimelineData | null>(null);
+  const canonicalHistoryFingerprintRef = useRef<string | null>(null);
   const canonicalHistorySupported = Boolean(provider.shotComposition?.listHistory && provider.shotComposition?.restoreHistory);
 
   const syncHistoryState = useCallback(() => {
@@ -478,17 +484,35 @@ export function useTimelineHistory({
       return;
     }
 
-    setCanonicalHistoryError(null);
+    const basis = dataRef.current;
+    const fingerprint = historyBasis(basis);
+    canonicalHistoryBasisRef.current = null;
+    canonicalHistoryFingerprintRef.current = null;
+    setCanonicalHistoryError(remoteHistory ? 'Loading timeline history…' : null);
     try {
+      await remoteHistory?.refreshHistory?.();
       const entries = await listHistory({ projectId: historyProjectId, parentDocumentId: timelineId });
-      if (requestId === canonicalHistoryRequestRef.current) setCanonicalHistory(entries);
+      if (requestId === canonicalHistoryRequestRef.current) {
+        if (remoteHistory && (dataRef.current !== basis || historyBasis(dataRef.current) !== fingerprint
+          || !basis?.head?.headRevisionId || !basis.head.headPublicationId
+          || !remoteHistory.remoteHistoryAvailable()
+          || !entries.some(entry => entry.isCurrentHead && entry.revisionId === basis.head?.headRevisionId))) {
+          setCanonicalHistory([]);
+          setCanonicalHistoryError('Timeline changed while history was loading. Open history again.');
+          return;
+        }
+        canonicalHistoryBasisRef.current = basis;
+        canonicalHistoryFingerprintRef.current = fingerprint;
+        setCanonicalHistory(entries);
+        setCanonicalHistoryError(null);
+      }
     } catch (error: unknown) {
       if (requestId === canonicalHistoryRequestRef.current) {
         setCanonicalHistory([]);
         setCanonicalHistoryError(error instanceof Error ? error.message : String(error));
       }
     }
-  }, [historyProjectId, provider, timelineId]);
+  }, [dataRef, historyProjectId, provider, remoteHistory, timelineId]);
 
   useEffect(() => {
     return () => {
@@ -499,6 +523,12 @@ export function useTimelineHistory({
   const restoreCanonicalRevision = useCallback(async (revisionId: string) => {
     const restoreHistory = provider.shotComposition?.restoreHistory;
     if (!restoreHistory || !timelineId || !historyProjectId) return;
+    if (remoteHistory && (!canonicalHistoryBasisRef.current || canonicalHistoryBasisRef.current !== dataRef.current
+      || canonicalHistoryFingerprintRef.current !== historyBasis(dataRef.current)
+      || !remoteHistory.remoteHistoryAvailable() || !canonicalHistory.some(entry => entry.revisionId === revisionId))) {
+      setCanonicalHistoryError('Load current timeline history before restoring a revision.');
+      return;
+    }
     if (editability?.checkTimeline && !editability.checkTimeline().allowed) return;
     if (pendingOpsRef.current > 0 || isInteractionActive(interactionStateRef)) {
       setCanonicalHistoryError('History restore is paused while an edit or media upload is active.');
@@ -525,22 +555,26 @@ export function useTimelineHistory({
     } finally {
       setRestoringCanonicalRevisionId(null);
     }
-  }, [editability, historyProjectId, interactionStateRef, pendingOpsRef, provider, syncHistoryState, timelineId, toast]);
+  }, [canonicalHistory, dataRef, editability, historyProjectId, interactionStateRef, pendingOpsRef, provider, remoteHistory, syncHistoryState, timelineId, toast]);
 
   // Read at render time. Every pendingOps transition is bracketed by a data
   // commit (skeleton insert on increment; skeleton removal / failure cleanup
   // before the `finally` decrement), so the tree re-renders right after each
   // transition and this value cannot go stale for longer than that commit.
   const historyPausedForUploads = pendingOpsRef.current > 0;
+  const historyStale = Boolean(remoteHistory && canonicalHistoryBasisRef.current
+    && (canonicalHistoryBasisRef.current !== dataRef.current
+      || canonicalHistoryFingerprintRef.current !== historyBasis(dataRef.current)
+      || !remoteHistory.remoteHistoryAvailable()));
 
   return {
     canUndo: (remoteHistory ? remoteHistory.canUndo() : canUndo) && !historyPausedForUploads,
     canRedo: (remoteHistory ? remoteHistory.canRedo() : canRedo) && !historyPausedForUploads,
     historyPausedForUploads,
     checkpoints,
-    canonicalHistory,
+    canonicalHistory: historyStale ? [] : canonicalHistory,
     canonicalHistorySupported,
-    canonicalHistoryError,
+    canonicalHistoryError: historyStale ? 'Timeline changed. Open history again.' : canonicalHistoryError,
     refreshCanonicalHistory,
     restoringCanonicalRevisionId,
     restoreCanonicalRevision,

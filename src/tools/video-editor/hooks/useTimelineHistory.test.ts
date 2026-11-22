@@ -236,6 +236,30 @@ afterEach(() => {
 });
 
 describe('useTimelineHistory', () => {
+  it('does not expose unloaded or late history to restore after the draft changes', async () => {
+    let release!: (entries: never[]) => void;
+    const listHistory = vi.fn(() => new Promise<never[]>(resolve => { release = resolve; }));
+    const restoreHistory = vi.fn();
+    const remoteHistory = { remoteHistoryAvailable: () => true, canUndo: () => false, canRedo: () => false,
+      undo: vi.fn(), redo: vi.fn() };
+    const initialData = { ...makeTimelineData(0), head: { projectId: 'project-1', timelineId: 'timeline-1',
+      headRevisionId: 'r0', headPublicationId: 'p0' } };
+    const { result, dataRef } = setup({ initialData, remoteHistory,
+      providerOverrides: { shotComposition: { load: vi.fn(), listHistory, restoreHistory } as unknown as DataProvider['shotComposition'] } });
+    expect(result.current.canonicalHistoryError).toMatch(/not been loaded/);
+    await act(async () => { await result.current.restoreCanonicalRevision('old'); });
+    expect(restoreHistory).not.toHaveBeenCalled();
+    let pending!: Promise<void>;
+    act(() => { pending = result.current.refreshCanonicalHistory(); });
+    await act(async () => { await Promise.resolve(); });
+    dataRef.current = { ...initialData, signature: 'changed' };
+    await act(async () => { release([]); await pending; });
+    expect(result.current.canonicalHistory).toEqual([]);
+    expect(result.current.canonicalHistoryError).toMatch(/changed while history/);
+    await act(async () => { await result.current.restoreCanonicalRevision('old'); });
+    expect(restoreHistory).not.toHaveBeenCalled();
+  });
+
   it('delegates mounted undo/redo to durable history once the owner is settled', async () => {
     const remoteHistory = {
       remoteHistoryAvailable: vi.fn(() => true),

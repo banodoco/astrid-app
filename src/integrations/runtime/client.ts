@@ -728,14 +728,14 @@ export class AstridRuntimeClient {
     }
   }
 
-  /** Installer routes use the authenticated connector directly and deliberately skip workspace negotiation. */
-  private async installerUpdateRequest(method: 'GET' | 'POST', path: string): Promise<Uint8Array> {
+  /** Direct extension and installer transport; callers choose whether negotiation is required. */
+  private async directRequest(method: 'GET' | 'POST', path: string, description = 'Installer update', timeoutMs = method === 'GET' ? 8000 : 30_000): Promise<Uint8Array> {
     const headers: Record<string, string> = { Accept: 'application/json' };
     if (this.token) headers.Authorization = `Bearer ${this.token}`;
     let response: { status: number; headers: Record<string, string>; body: Uint8Array };
     if (this.transport) {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(new DOMException(method === 'GET' ? 'Installer update read timed out' : 'Installer update acknowledgement timed out; check status before another action', 'TimeoutError')), method === 'GET' ? 8000 : 30_000);
+      const timeout = setTimeout(() => controller.abort(new DOMException(method === 'GET' ? `${description} read timed out` : `${description} acknowledgement timed out; check status before another action`, 'TimeoutError')), timeoutMs);
       const abortCaller = () => controller.abort(this.signal?.reason);
       if (this.signal?.aborted) abortCaller();
       else this.signal?.addEventListener('abort', abortCaller, { once: true });
@@ -751,7 +751,7 @@ export class AstridRuntimeClient {
       }
     } else {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(new DOMException(method === 'GET' ? 'Installer update read timed out' : 'Installer update acknowledgement timed out; check status before another action', 'TimeoutError')), method === 'GET' ? 8000 : 30_000);
+      const timeout = setTimeout(() => controller.abort(new DOMException(method === 'GET' ? `${description} read timed out` : `${description} acknowledgement timed out; check status before another action`, 'TimeoutError')), timeoutMs);
       const abortCaller = () => controller.abort(this.signal?.reason);
       if (this.signal?.aborted) abortCaller();
       else this.signal?.addEventListener('abort', abortCaller, { once: true });
@@ -794,14 +794,14 @@ export class AstridRuntimeClient {
   /** Read status without schema handshake, and bypass all browser/proxy caches. */
   async readInstallerUpdateStatus(): Promise<InstallerUpdateStatus> {
     return validateInstallerUpdateStatus(JSON.parse(new TextDecoder().decode(
-      await this.installerUpdateRequest('GET', '/v1/update/status'),
+      await this.directRequest('GET', '/v1/update/status'),
     )) as unknown);
   }
 
   /** Read the authenticated startup identity needed to classify the installation. */
   async readInstallerUpdateHealth(): Promise<InstallerUpdateHealth> {
     return validateInstallerUpdateHealth(JSON.parse(new TextDecoder().decode(
-      await this.installerUpdateRequest('GET', '/v1/health'),
+      await this.directRequest('GET', '/v1/health'),
     )) as unknown);
   }
 
@@ -809,7 +809,7 @@ export class AstridRuntimeClient {
   async startInstallerUpdate(): Promise<InstallerUpdateAcceptance> {
     if (this.readOnly) throw new RuntimeCompatibilityError('identity', 'A discovery client cannot start an update.', this.baseUrl);
     return validateInstallerUpdateAcceptance(JSON.parse(new TextDecoder().decode(
-      await this.installerUpdateRequest('POST', '/v1/update'),
+      await this.directRequest('POST', '/v1/update'),
     )) as unknown);
   }
 
@@ -962,6 +962,17 @@ export class AstridRuntimeClient {
     limit = 50,
   ): Promise<HistoryPage> {
     return this.withSession(() => this.client.listTimelineCommits(projectId, timelineId, cursor, limit));
+  }
+
+  /** The extension is optional only when the authenticated handshake omits it. */
+  async getTimelineVerifiedHead(projectId: string, timelineId: string): Promise<unknown | undefined> {
+    return this.withRetainedRead(async () => {
+      const session = await this.ensureSession();
+      if (!session.handshake.capabilities.includes('timeline.verified_head.v1')) return undefined;
+      const path = `/v1/projects/${encodeURIComponent(projectId)}/timelines/${encodeURIComponent(timelineId)}/verified-head`;
+      const body = await this.directRequest('GET', path, 'Verified timeline head', 120_000);
+      return JSON.parse(new TextDecoder().decode(body)) as unknown;
+    });
   }
 
   async createTimeline(

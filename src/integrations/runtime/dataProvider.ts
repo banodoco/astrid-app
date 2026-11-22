@@ -894,6 +894,23 @@ export class RuntimeDataProvider implements DataProvider {
   /** Public verified history pins plus scoped immutable reads, never projected rows. */
   async loadTimelineCommandBasis(timelineId: string): Promise<TimelineCommandBasis> {
     const observe = timelineBasisDiagnostics(this);
+    const verified = await this.client.getTimelineVerifiedHead(this.projectId, timelineId);
+    if (verified !== undefined) {
+      const value = requiredRecord(verified, 'verified timeline head');
+      if (value.project_id !== this.projectId || value.timeline_id !== timelineId) {
+        throw new TimelineSchemaIncompatibleError('Workspace Runtime returned a verified head outside the requested scope');
+      }
+      const head = requiredRecord(value.head, 'verified timeline head pair');
+      const revisionId = requiredString(head.revision_id, 'verified head revision_id');
+      const publicationId = requiredString(head.publication_id, 'verified head publication_id');
+      const canonicalDocument = validateAcceptedCanonicalDocument(value.canonical_document as CanonicalDocument, this.projectId, timelineId, revisionId);
+      return { head: { revisionId, publicationId }, canonicalDocument,
+        graph: runtimeGraphToContractFromCanonicalDocument(this.projectId, timelineId, canonicalDocument, publicationId) };
+    }
+    return this.loadTimelineCommandHistory(timelineId, observe);
+  }
+
+  async loadTimelineCommandHistory(timelineId: string, observe = timelineBasisDiagnostics(this)): Promise<TimelineCommandBasis> {
     const finishLoader = observe('loader');
     // Immutable reads are complete only when their assembled closure validates.
     const pendingReads: Array<(completed: boolean) => void> = [];

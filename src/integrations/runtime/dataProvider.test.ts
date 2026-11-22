@@ -953,6 +953,34 @@ describe('verified basis loader diagnostics', () => {
     expect(calls.some(path => path.includes('/commits?'))).toBe(false);
   });
 
+  it.each(['not-found', 'scope', 'pair', 'closure'] as const)(
+    'refuses an advertised verified head failure without falling back (%s)', async fault => {
+      const fixture = runtimeFixture();
+      const head = { revision_id: 'r0', publication_id: 'p0' };
+      const document = acceptedCommit(head, head,
+        { projectId: PROJECT_ID, timelineId: TIMELINE_ID, children: true }).data.canonical_document;
+      let historyReads = 0;
+      const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: async (...args) => {
+        const [, path] = args;
+        if (path === '/v1/handshake') {
+          const response = await fixture.transport(...args);
+          const handshake = JSON.parse(new TextDecoder().decode(response.body));
+          handshake.capabilities.push('timeline.verified_head.v1');
+          return { ...response, body: json(handshake) };
+        }
+        if (path.includes('/commits?')) historyReads++;
+        if (path.endsWith('/verified-head')) {
+          if (fault === 'not-found') return { status: 404, headers: {}, body: json({ code: 'not_found', message: 'missing timeline' }) };
+          return { status: 200, headers: {}, body: json({ project_id: fault === 'scope' ? 'other' : PROJECT_ID,
+            timeline_id: TIMELINE_ID, head: fault === 'pair' ? { ...head, publication_id: '' } : head,
+            canonical_document: fault === 'closure' ? { ...document, timeline_id: 'other' } : document }) };
+        }
+        return fixture.transport(...args);
+      } });
+      await expect(provider.loadTimelineCommandBasis(TIMELINE_ID)).rejects.toThrow();
+      expect(historyReads).toBe(0);
+    });
+
   it.each([
     ['history-head', 'history', /malformed timeline history head/],
     ['next-history-head', 'history', /malformed timeline history head/],

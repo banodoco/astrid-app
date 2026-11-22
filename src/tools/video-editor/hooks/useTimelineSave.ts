@@ -240,6 +240,12 @@ export function useTimelineSave(
       return receipt;
     },
     remoteHistoryAvailable: () => localOwner.handoff?.remoteHistoryAvailable() ?? false,
+    refreshHistory: async () => {
+      const handoff = await localOwner.ready;
+      if (localOwner.closed || !handoff) return;
+      await handoff.refreshHistory?.();
+      if (!localOwner.closed) setLocalSaveState((current) => current ? { ...current } : current);
+    },
     canUndo: () => localOwner.handoff?.canUndo() ?? false,
     canRedo: () => localOwner.handoff?.canRedo() ?? false,
     undo: async () => {
@@ -482,7 +488,7 @@ export function useTimelineSave(
         }
         if (!isCurrent()) throw markTimelineSaveRejection(new Error('Local save session replaced during history read'), 'owner-history-invalidated', 'Error');
         const handoff = createTimelineLocalSaveHandoff({ initial, source: adoptedSource, session,
-          loadHistory: () => provider.loadTimelineCommandBasis!(timelineId),
+          loadHistory: () => (provider.loadTimelineCommandHistory ?? provider.loadTimelineCommandBasis)!.call(provider, timelineId),
           adopted: () => {
             emitTimelineSaveDiagnostic('adopted-read', () => ({ owner: localOwner, timelineId,
               mounted: localDataRef.current, source: adoptedSource, basis: verified,

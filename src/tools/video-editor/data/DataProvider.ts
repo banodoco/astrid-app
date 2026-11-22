@@ -459,6 +459,8 @@ export interface DataProvider extends AssetResolver {
   /** Command commits are supplied whole by gesture/command producers. */
   timelineCommands?: TimelineCommitCapability;
   loadTimelineCommandBasis?(timelineId: string): Promise<TimelineCommandBasis>;
+  /** Complete, head-bound ancestry for durable history actions, loaded separately from authoring. */
+  loadTimelineCommandHistory?(timelineId: string): Promise<TimelineCommandBasis>;
   resolveTimelineCommandAsset?(file: string, registry: AssetRegistry): Promise<string>;
   commitTimeline?(request: CommitRequest, idempotencyKey: string): Promise<TimelineCommitResult>;
   undoTimeline?(base: TimelineHeadRevision, publications: readonly string[], idempotencyKey: string): Promise<TimelineCommitResult>;

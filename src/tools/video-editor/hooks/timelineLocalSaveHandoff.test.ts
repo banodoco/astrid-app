@@ -1148,6 +1148,37 @@ describe('prepared image media on a newly created track', () => {
 });
 
 describe('Undo/Redo target only this actor\'s own publications', () => {
+  it('distinguishes unloaded history from a complete empty history', async () => {
+    const env = await environment();
+    const history = { items: [], next_cursor: null, head: { revision_id: 'r0', publication_id: 'p0' } };
+    const loadHistory = vi.fn(async () => ({ ...env.initial, history }));
+    const handoff = createTimelineLocalSaveHandoff({ initial: env.initial, source: env.source,
+      session: env.session, adopted: env.receipt, loadHistory });
+    expect(handoff.remoteHistoryAvailable()).toBe(false);
+    expect(loadHistory).not.toHaveBeenCalled();
+    await expect(handoff.undo()).rejects.toThrow('history is not settled');
+    await handoff.refreshHistory!();
+    expect(handoff.remoteHistoryAvailable()).toBe(true);
+    expect(handoff.canUndo()).toBe(false);
+    await env.session.dispose();
+  });
+
+  it.each(['head', 'draft', 'capture'] as const)('discards history arriving after a %s change', async change => {
+    const env = await environment();
+    let release!: (value: typeof env.initial & { history: { items: never[]; next_cursor: null; head: { revision_id: string; publication_id: string } } }) => void;
+    const loadHistory = () => new Promise<Parameters<typeof release>[0]>(resolve => { release = resolve; });
+    const handoff = createTimelineLocalSaveHandoff({ initial: env.initial, source: env.source,
+      session: env.session, adopted: env.receipt, loadHistory });
+    const pending = handoff.refreshHistory!();
+    if (change === 'head') vi.spyOn(env.session, 'getBasis').mockReturnValue({ ...env.initial, head: { revisionId: 'r0', publicationId: 'new' } });
+    else if (change === 'draft') vi.spyOn(env.session, 'getDocument').mockReturnValue({ ...env.initial.canonicalDocument, changed: true } as never);
+    else await handoff.capture(env.source);
+    release({ ...env.initial, history: { items: [], next_cursor: null, head: { revision_id: 'r0', publication_id: 'p0' } } });
+    await pending;
+    expect(handoff.remoteHistoryAvailable()).toBe(false);
+    await env.session.dispose();
+  });
+
   const entry = (id: string, previous: string | null, publisher: string, undoOf: string[] = []) => ({
     publication_id: id, revision_id: id === 'p0' ? 'r0' : `r-${id}`, previous: previous ? { publication_id: previous } : null,
     publisher, intent: 'recorded',

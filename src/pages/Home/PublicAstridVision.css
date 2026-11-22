@@ -52,6 +52,7 @@
   align-content: center;
   min-height: min(calc(100svh - 74px), 90vw);
   padding-bottom: 74px;
+  pointer-events: none;
 }
 .astrid-vision-hero {
   display: grid;
@@ -406,6 +407,7 @@
 
 @media (min-width: 761px) and (max-width: 1000px) {
   .astrid-vision-juggler { --px: 3px; }
+  .astrid-vision-planet-space { --planet-stage-unit: 3px; }
 }
 @media (max-width: 900px) {
 }
@@ -609,11 +611,7 @@
 }
 
 .astrid-vision-standards { margin-top: clamp(80px, 10vw, 128px); }
-/* This connected group earns more horizontal room than the text sections.
-   The edge-to-edge dividers are intentional: the principles work together. */
-.astrid-vision > .astrid-vision-standards { width: min(100%, 1360px); }
-/* Keep editorial headings in the original 1120px reading column even though
-   the four connected cards themselves extend further toward the edges. */
+/* Keep the Principles heading in the same reading column as its cards. */
 .astrid-vision-standards > .astrid-vision-section-head {
   max-width: 1120px;
   margin-inline: auto;
@@ -2043,7 +2041,6 @@
 
 /* Principles: the reading column on the left, a larger sigil on the right,
    both inside the same column as the heading above them. */
-.astrid-vision > .astrid-vision-standards { width: min(100%, 1120px); }
 .astrid-vision .astrid-vision-standards-list > li {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 96px;
@@ -2234,11 +2231,73 @@
 /* Loading and live copy share one layout. Navigation already owns its fade;
    starting another translated text entrance after the feed arrives looks like
    a second layout. Keep text sizing stable in mobile transition snapshots. */
-.astrid-vision-hero-copy { min-width: 0; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+.astrid-vision-hero-copy { min-width: 0; pointer-events: auto; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 .astrid-vision-hero-copy > .astrid-vision-hero-text { animation: none; }
+
+/* One document-bounded scene covers the opening and Foundations. The stage is out of flow, so the
+   illustration's original hero slot can preserve copy geometry without making the canvas a wallpaper. */
+.astrid-vision-story { position: relative; isolation: isolate; }
+.astrid-vision-story > .astrid-vision-planet-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+.astrid-vision-story > :not(.astrid-vision-planet-layer) { position: relative; z-index: 1; }
+.astrid-vision-planet-pin {
+  position: sticky;
+  top: 86px;
+  width: 100%;
+  height: calc(100vh - 86px);
+  height: calc(100svh - 86px);
+  pointer-events: none;
+}
+.astrid-vision-planet-space {
+  --planet-stage-unit: 4px;
+  position: relative;
+  justify-self: center;
+  width: calc(65 * var(--planet-stage-unit));
+  height: calc(100 * var(--planet-stage-unit));
+  pointer-events: none;
+}
+.astrid-vision-planet {
+  position: relative;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  margin: 0;
+  pointer-events: none;
+}
+.astrid-vision-planet-canvas {
+  width: 100%;
+  height: 100%;
+  pointer-events: auto;
+  touch-action: pan-y;
+}
+.astrid-vision-foundations {
+  position: relative;
+  isolation: isolate;
+  margin: clamp(32px, 5vw, 64px) auto 0;
+  padding: clamp(14px, 2.2vw, 28px);
+  border: 1px solid color-mix(in srgb, var(--astrid-ink) 12%, transparent);
+  border-radius: clamp(20px, 3vw, 32px);
+  background: color-mix(in srgb, var(--astrid-paper) 76%, transparent);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+  pointer-events: none;
+}
+.astrid-vision-foundations :is(a, button, li, input, select, textarea, summary, [tabindex]) { pointer-events: auto; }
+.astrid-vision-foundations > .astrid-vision-north-star,
+.astrid-vision-foundations > .astrid-vision-standards {
+  width: 100%;
+}
+.astrid-vision-foundations > .astrid-vision-standards { margin-top: clamp(80px, 10vw, 128px); }
 .astrid-vision-skeleton-hero .astrid-vision-skeleton-text * { color: transparent; }
 .astrid-vision-skeleton-hero .pixel-underline-mark { visibility: hidden; }
 .astrid-vision-skeleton-hero:not([data-skeleton-visible]) .astrid-vision-skeleton-text {
   background: none; animation: none;
 }
+.astrid-vision-loading-sections { pointer-events: none; }
 .astrid-vision-loading-sections:not([data-skeleton-visible]) { visibility: hidden; }

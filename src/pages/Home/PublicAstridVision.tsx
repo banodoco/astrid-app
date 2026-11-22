@@ -498,6 +498,12 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
           includeHelp={true} />}
       </header>
 
+      <div className="astrid-vision-story">
+      <div className="astrid-vision-planet-layer" aria-hidden="true">
+        <div className="astrid-vision-planet-pin">
+          <PublicAstridPlanet live={visible && !reducedMotion} />
+        </div>
+      </div>
       <section id="astrid-vision-manifesto" className="astrid-vision-manifesto" aria-labelledby="astrid-vision-title">
         <div className="astrid-vision-hero">
           <div className="astrid-vision-hero-copy">
@@ -528,7 +534,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
               </p>}
             </div>
           </div>
-          <PublicAstridPlanet live={visible && !reducedMotion} />
+          <div className="astrid-vision-planet-space" aria-hidden="true" />
         </div>
       </section>
 
@@ -556,6 +562,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
         </div>
       )}
       {content && (<>
+      <section className="astrid-vision-foundations" role="region" aria-label="Foundations">
       <section id="astrid-vision-pillars" className="astrid-vision-north-star" aria-labelledby="astrid-vision-north-star-title">
         <div className="astrid-vision-section-head" data-reveal>
           <p className="astrid-vision-eyebrow" data-index="02">Pillars</p>
@@ -608,8 +615,10 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
           ))}
         </ol>
       </section>
+      </section>
 
       </>)}
+      </div>
       {content && selectedSubject && (
         <VisionDetailDialog key={selectedSubject.kind}
           content={content} subject={selectedSubject} onSelect={setSelectedSubject} onClose={closeSubject} />

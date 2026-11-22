@@ -23,6 +23,20 @@
   opacity: 1; transform: none; translate: none; transition: none;
 }
 @media (max-width: 760px) {
+  .astrid-vision-planet-space { --planet-stage-unit: clamp(2px, .75vw, 3px); }
+  .astrid-vision-planet-pin {
+    top: 68px;
+    height: calc(100vh - 68px);
+    height: calc(100svh - 68px);
+  }
+  .astrid-vision-foundations {
+    margin-top: 32px;
+    padding: 12px;
+    border-radius: 20px;
+    background: color-mix(in srgb, var(--astrid-paper) 82%, transparent);
+    -webkit-backdrop-filter: blur(14px);
+    backdrop-filter: blur(14px);
+  }
   .astrid-vision .astrid-vision-principles,
   .astrid-vision .astrid-vision-loading-pillars { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .astrid-vision .astrid-vision-principles > li {

@@ -2232,18 +2232,40 @@
    starting another translated text entrance after the feed arrives looks like
    a second layout. Keep text sizing stable in mobile transition snapshots. */
 .astrid-vision-hero-copy { min-width: 0; pointer-events: auto; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+.astrid-vision-hero-copy { position: relative; isolation: isolate; }
+.astrid-vision-hero-copy::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: -16px -20px;
+  border-radius: 24px;
+  background: color-mix(in srgb, var(--astrid-paper) 84%, transparent);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+  pointer-events: none;
+}
 .astrid-vision-hero-copy > .astrid-vision-hero-text { animation: none; }
 
 /* One document-bounded scene covers the opening and Foundations. The stage is out of flow, so the
    illustration's original hero slot can preserve copy geometry without making the canvas a wallpaper. */
-.astrid-vision-story { position: relative; isolation: isolate; }
+.astrid-vision-story {
+  position: relative;
+  isolation: isolate;
+  width: 100vw;
+  margin-left: calc(50% - 50vw);
+}
 .astrid-vision-story > .astrid-vision-planet-layer {
   position: absolute;
   inset: 0;
   z-index: 0;
   pointer-events: none;
 }
-.astrid-vision-story > :not(.astrid-vision-planet-layer) { position: relative; z-index: 1; }
+.astrid-vision-story > :not(.astrid-vision-planet-layer) {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 1120px);
+  margin-inline: auto;
+}
 .astrid-vision-planet-pin {
   position: sticky;
   top: 86px;

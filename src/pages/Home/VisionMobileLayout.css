@@ -29,6 +29,9 @@
     height: calc(100vh - 68px);
     height: calc(100svh - 68px);
   }
+  .astrid-vision-planet-pin > .astrid-vision-planet {
+    transform: translate(20vw, 110px);
+  }
   .astrid-vision-foundations {
     margin-top: 32px;
     padding: 12px;

@@ -23,19 +23,24 @@ export type ProjectElementComponent = ComponentType<AstridElementComponentProps>
 
 const KINDS = new Set(['effect', 'animation', 'transition']);
 const SUPPORT = new Set(['supported', 'blocked', 'unknown']);
+const RENDERABILITY_KEYS = ['preview', 'browserExport', 'workerExport'] as const;
 /** Bare specifiers the admitted bundles leave external; the document's pinned import map must bind each one. */
 const HOST_SPECIFIERS = ['react', 'react/jsx-runtime', 'remotion'] as const;
 
 const text = (value: unknown): value is string => typeof value === 'string';
 const allText = (value: Record<string, unknown>, keys: readonly string[]) => keys.every(key => text(value[key]));
 /** The descriptor fields the editor's catalog and placeholders read, so a consumer never meets a missing one. */
-const validDescriptor = (descriptor: Record<string, unknown>, ref: Record<string, unknown>) => (
-  descriptor.packId === ref.packId && descriptor.kind === ref.kind && descriptor.id === ref.id && descriptor.revision === ref.revision
-  && allText(descriptor, ['label', 'description', 'componentPath']) && !!descriptor.label && !!descriptor.componentPath
-  && Array.isArray(descriptor.parameters) && descriptor.parameters.every((parameter: unknown) => record(parameter) && text(parameter.name) && text(parameter.type))
-  && record(descriptor.defaults) && record(descriptor.renderability) && Object.keys(descriptor.renderability).length === 3
-  && ['preview', 'browserExport', 'workerExport'].every(key => SUPPORT.has(descriptor.renderability[key]))
-);
+const validDescriptor = (descriptor: Record<string, unknown>, ref: Record<string, unknown>) => {
+  const renderability = descriptor.renderability;
+  return descriptor.packId === ref.packId && descriptor.kind === ref.kind && descriptor.id === ref.id && descriptor.revision === ref.revision
+    && allText(descriptor, ['label', 'description', 'componentPath']) && !!descriptor.label && !!descriptor.componentPath
+    && Array.isArray(descriptor.parameters) && descriptor.parameters.every((parameter: unknown) => record(parameter) && text(parameter.name) && text(parameter.type))
+    && record(descriptor.defaults) && record(renderability) && Object.keys(renderability).length === RENDERABILITY_KEYS.length
+    && RENDERABILITY_KEYS.every(key => {
+      const status = renderability[key];
+      return text(status) && SUPPORT.has(status);
+    });
+};
 const validAuthoring = (authoring: Record<string, unknown>) => allText(authoring, ['packRoot', 'descriptorPath', 'componentPath', 'status']);
 const validProject = (project: unknown) => record(project)
   && allText(project, ['projectId', 'packId', 'packRoot', 'status', 'initCommand', 'admitCommand', 'inspectCommand']);

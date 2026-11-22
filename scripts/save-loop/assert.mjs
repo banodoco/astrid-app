@@ -356,7 +356,7 @@ function defaultAssertion(expected, before, after, result, hasScenarioVerify) {
 }
 
 /** Create an observable row recorder for the current fixture page. */
-export async function createRecorder(page, {fixture, baseUrl, resultsPath, allowEmpty = false} = {}) {
+export async function createRecorder(page, {fixture, baseUrl, resultsPath, allowEmpty = false, initialSnapshot = null} = {}) {
   if (!page || typeof page.evaluate !== 'function') throw new TypeError('createRecorder requires a Playwright page');
   if (!fixture?.project_id || !fixture?.timeline_id) throw new Error('fixture must include project_id and timeline_id');
   if (typeof baseUrl !== 'string' || !baseUrl) throw new Error('baseUrl is required');
@@ -394,6 +394,7 @@ export async function createRecorder(page, {fixture, baseUrl, resultsPath, allow
   page.on('requestfailed', onRequestFailed);
 
   let checkedFixture = false;
+  let nextInitialSnapshot = initialSnapshot;
   async function runRow(descriptor) {
     await installBadgeObserver(page);
     const rowStartedAt = await page.evaluate(() => performance.timeOrigin + performance.now());
@@ -417,7 +418,8 @@ export async function createRecorder(page, {fixture, baseUrl, resultsPath, allow
       if (!descriptor || typeof descriptor.gesture !== 'function' || !['saved', 'clash'].includes(descriptor.expected)) {
         throw new TypeError('descriptor requires name, gesture, and expected saved|clash');
       }
-      before = await publicSnapshot(page, baseUrl, fixture, {allowEmpty});
+      before = nextInitialSnapshot ?? await publicSnapshot(page, baseUrl, fixture, {allowEmpty});
+      nextInitialSnapshot = null;
       if (!checkedFixture && !allowEmpty) {
         const expected = fixture.media?.retained_object_ids;
         if (!Array.isArray(expected) || !expected.length || expected.some(id => !OBJECT_ID.test(id)))

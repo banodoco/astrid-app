@@ -17,6 +17,14 @@ export function quickIndicatorRow({size, label, usableSeconds, blockedSeconds, i
   };
 }
 
+export function quickSaveValue(row) {
+  if (row?.pass === true && Number.isFinite(row.ms)) return row.ms / 1000;
+  if (row?.final_badge === 'not saved' || /refus|not saved|no successful public timeline commit response/i.test(row?.reason ?? '')) {
+    return {refused:true, reason:row.reason ?? 'no Saved within the 60-second arm deadline'};
+  }
+  return {reason:row?.reason ?? 'save outcome not observed'};
+}
+
 export function formatQuickTable(rows) {
   const cell = value => value.seconds === null ? value.light : `${value.light} ${value.seconds.toFixed(1)}s`;
   const lines = ['Size | Usable | Blocked | Save after open | Save after quiet', '--- | --- | --- | --- | ---'];

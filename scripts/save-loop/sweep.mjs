@@ -26,7 +26,7 @@ function flag(name) {
 const probeOnly = args.includes('--broken-probe-only');
 const reducedOpening = args.includes('--reduced-opening');
 const quick = args.includes('--quick');
-if (quick && !reducedOpening) throw new Error('--quick requires --reduced-opening');
+if (quick && (probeOnly || args.includes('--broken-probe') || args.includes('--broken-probe-only'))) throw new Error('--quick cannot be combined with broken probes');
 if (reducedOpening && (probeOnly || args.includes('--broken-probe'))) throw new Error('--reduced-opening cannot be combined with broken probes');
 const manifestPath = flag('--manifest');
 const resultsPath = flag('--results');
@@ -55,7 +55,7 @@ const record = value => {
   if (value?.type === 'post_open_blocked') postOpenObservation = value;
   fs.appendFileSync(resultsPath, JSON.stringify(value)+'\n');
 };
-const round4 = reducedOpening ? await import('./round4.mjs') : null;
+const round4 = reducedOpening || quick ? await import('./round4.mjs') : null;
 for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]]) {
   process.once(signal, async () => {
     try { if (browser) await browser.close(); } finally { process.exit(code); }
@@ -63,10 +63,11 @@ for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]]) {
 }
 let failed = false;
 const rows = [];
+let quickRowWritten=false;
 try {
-  const {b, p: page, context, cpu, opening, startup, measureWarmOpening} = await helpers.open({
-    fixture:probeOnly ? undefined : fixture, reducedOpening, onCleanup: close => { browser = {close}; },
-    onProvisional: reducedOpening ? ({warm, value, page, startup, marker}) => {
+  const {b, p: page, context, cpu, opening, startup, measureWarmOpening, quickBaseline, quickMarker, quickProject} = await helpers.open({
+    fixture:probeOnly ? undefined : fixture, reducedOpening:reducedOpening&&!quick, quickOpening:quick, onCleanup: close => { browser = {close}; },
+    onProvisional: reducedOpening || quick ? ({warm, value, page, startup, marker}) => {
       record({type:warm ? 'warm_opening_provisional' : 'cold_opening_provisional', full_ui_saved:value, corroborated:false, marker_at:new Date().toISOString(), readiness_budget_ms:900000, limitation:'UI sample only; public head not yet corroborated.'});
       if (!warm) {
         provisionalSeen=true;
@@ -79,7 +80,7 @@ try {
   browser = b;
   let secondPage;
   const readStartup = (phase, operation) => startup ? startup.read(phase, operation) : operation();
-  const project = await readStartup('project', () => page.evaluate(async projectId => {
+  const project = quick ? quickProject : await readStartup('project', () => page.evaluate(async projectId => {
     const response = await fetch(`/api/runtime/v1/projects/${encodeURIComponent(projectId)}`, {credentials:'same-origin', cache:'no-store'});
     if (!response.ok) throw new Error(`sandbox project read failed (${response.status})`);
     const body = await response.json(); return body?.data ?? body;
@@ -87,7 +88,9 @@ try {
   if (project.project_id !== fixture.project_id || project.metadata?.purpose !== 'synthetic Plan 77 save-loop fixture')
     throw new Error('project is not the synthetic Plan 77 sandbox fixture');
   fs.appendFileSync(resultsPath, JSON.stringify({type:'run', variant:fixture.variant || 'standard', date:new Date().toISOString(), versions, project_id:fixture.project_id, timeline_id:fixture.timeline_id, manifest:manifestPath}) + '\n');
-  if (opening) {
+  if (opening && quick) {
+    record({...opening, baseline_captured_before_navigation:true, pre_open_head:{revision:quickBaseline.headRevision,publication:quickBaseline.publicationId,exact_clip_ids:sameIds(quickBaseline.clipIds,expectedFixtureIds(fixture))}});
+  } else if (opening) {
     const head = await readStartup('head_after_ui', () => publicSnapshot(page, baseUrl, fixture));
     const idsMatch = sameIds(head.clipIds, expectedFixtureIds(fixture));
     opening.public_head = {project_id:head.project_id, timeline_id:head.timeline_id, revision:head.headRevision, publication:head.publicationId, exact_clip_ids:idsMatch};
@@ -100,7 +103,7 @@ try {
     fs.appendFileSync(resultsPath, JSON.stringify(opening)+'\n');
     if (!idsMatch) throw new Error('public head clip IDs do not match expected fixture');
   }
-  if (reducedOpening) {
+  if (reducedOpening && !quick) {
     if (!probePromise) throw new Error('stable cold UI marker was not observed');
     await probePromise;
     const warm = await measureWarmOpening(true);
@@ -115,37 +118,70 @@ try {
     record(warm);
     if (!idsMatch || !warm.full_open_corroborated || warmHead.headRevision!==opening.public_head.revision || warmHead.publicationId!==opening.public_head.publication) throw new Error('warm opening did not preserve the corroborated cold public head');
   }
-  const recorder = await createRecorder(page, {fixture, baseUrl, resultsPath, allowEmpty:probeOnly});
+  const emptyFixture = (fixture.measurement?.clip_count ?? expectedFixtureIds(fixture).length) === 0;
+  const recorder = await createRecorder(page, {fixture, baseUrl, resultsPath, allowEmpty:probeOnly || emptyFixture, initialSnapshot:quick ? quickBaseline : null});
   let descriptors = [];
   if (!probeOnly) {
-    if (!reducedOpening) {
+    if (!reducedOpening && !quick) {
     secondPage = await context.newPage();
     await secondPage.setViewportSize({width:1700, height:1500});
     await secondPage.goto(helpers.URL_);
     }
-    const {editScenarios, repeatScenarios} = await import('./edits.mjs');
+    const {editScenarios, repeatScenarios, quickTrackRenameScenario} = await import('./edits.mjs');
     const {dropScenarios} = await import('./drops.mjs');
     const {clashScenario} = await import('./clash.mjs');
     const contextArgs = {page, fixture, helpers};
     const edits = await editScenarios(contextArgs);
-    descriptors = reducedOpening ? edits.filter(d => ['video-move-same-track','audio-move-same-track','audio-mute'].includes(d.name)) : [
+    descriptors = quick ? [] : reducedOpening ? edits.filter(d => ['video-move-same-track','audio-move-same-track','audio-mute'].includes(d.name)) : [
       ...edits,
       ...await repeatScenarios(contextArgs),
       ...await dropScenarios(contextArgs),
       await clashScenario({...contextArgs, secondPage}),
     ];
-    if (reducedOpening) {
+    if (reducedOpening && !quick) {
       const names=descriptors.map(d=>d.name);
       if (names.length!==3 || new Set(names).size!==3) throw new Error('reduced descriptor inventory is incomplete');
       record({type:'reduced_matrix', names, repetitions:3, limitation:'Reduced opening sample; the full 85-scenario matrix remains unfinished.'});
     }
     if (quick) {
-      descriptors = descriptors.filter(d => d.name === 'video-move-same-track').slice(0, 1);
-      if (descriptors.length !== 1) throw new Error('quick mode needs the fixture video same-track move; empty fixtures require a track-rename descriptor');
-      descriptors[0] = {...descriptors[0], timeoutMs:60000};
-      record({type:'quick_matrix', names:descriptors.map(d => d.name), repetitions:1, limitation:'One measured quiet-phase move. The immediate arm is recorded as unobserved because the safeguarded public-head/read gate precedes gestures.'});
-      record({type:'quick_arm_limit', immediate_save:{observed:false, reason:'The safeguarded reduced-opening flow requires public-head corroboration and a warm reload before gestures; this run does not label its later gesture as immediate.'}, quiet_save:{planned:true, limitation:'The gesture runs only after the existing read gate and warm opening.'}});
+      const target = emptyFixture ? quickTrackRenameScenario(fixture) : edits.find(d => d.name === 'video-move-same-track');
+      if (!target) throw new Error('quick fixture lacks a supported same-track move or empty-track rename target');
+      descriptors = [target];
+      record({type:'quick_matrix', names:[target.name], repetitions:2, arms:['immediate_after_cold_open','after_subsecond_read'], cleanup:'guarded_public_undo_between_arms'});
     }
+  }
+  let quickImmediate=null, quickQuiet=null, quickImmediateClean=false;
+  if (quick) {
+    const descriptor=descriptors[0];
+    const runArm=async (armName, initial=false) => {
+      const row=await recorder.runRow({...descriptor,iteration:armName});
+      row.quick_arm=armName;
+      rows.push(row);
+      if (row.pass!==true) failed=true;
+      let cleanup=null, cleanupError=null;
+      try {
+        if (row.pass===true) cleanup=await round4.undoCleanup({page,fixture,baseUrl,result:row,allowEmpty:emptyFixture});
+        else {
+          const snapshot=await publicSnapshot(page,baseUrl,fixture,{allowEmpty:emptyFixture});
+          const clean=Boolean(row.before && row.after && snapshot.headRevision===row.before.headRevision && snapshot.publicationId===row.before.publicationId && snapshot.content_digest===row.public_snapshot?.before?.content_digest && snapshot.payload_digest===row.public_snapshot?.before?.payload_digest);
+          if (!clean) throw new Error(`${armName} did not save and fixture cleanliness could not be verified`);
+          cleanup={changed:false, unchanged_public_head_verified:true};
+        }
+      } catch (error) { cleanupError=String(error?.message||error); }
+      record({type:'quick_arm',arm:armName,result:row,cleanup,cleanup_error:cleanupError});
+      return {row,clean:!cleanupError && (cleanup?.changed===true || cleanup?.unchanged_public_head_verified===true),cleanupError};
+    };
+    const first=await runArm('immediate_after_cold_open');
+    quickImmediate=first.row; quickImmediateClean=first.clean;
+    if (quickImmediateClean) {
+      try { await probePromise; }
+      catch (error) { record({type:'quick_quiet_skipped',reason:'post-open read gate did not produce a subsecond response',detail:String(error?.message||error)}); }
+      if (postOpenObservation?.outcome==='available' && quickImmediateClean) {
+        const second=await runArm('after_subsecond_read');
+        quickQuiet=second.row;
+      } else if (!postOpenObservation) record({type:'quick_quiet_skipped',reason:'post-open read result was not observed'});
+    } else record({type:'quick_quiet_skipped',reason:first.cleanupError || 'immediate arm cleanup was not verified'});
+    descriptors=[];
   }
   if (args.includes('--broken-probe') || probeOnly) descriptors.push({
     name:'deliberately broken no-op probe', expected:'saved', timeoutMs:1000,
@@ -203,25 +239,33 @@ try {
   if (typeof recorder.finish === 'function') await recorder.finish();
   if (quick && opening) {
     const usable = opening.first_usable_ms == null ? null : opening.first_usable_ms / 1000;
-    const move = rows.find(row => row.name === 'video-move-same-track');
     const size = fixture.measurement?.clip_count ?? fixture.clips?.count ?? null;
+    const largeRestored = size === 300 && fixture.measurement?.accepted_prefix_clip_count === 300;
     const row = quickTools.quickIndicatorRow({
-      size, label:fixture.variant === 'v30' || fixture.measurement?.label === 'heavy seed history, worst case' ? 'heavy seed history, worst case' : `${size ?? 'unknown'} clips`,
+      size, label:largeRestored || fixture.variant === 'v30' || fixture.measurement?.label === 'heavy seed history, worst case' ? 'heavy seed history, worst case' : `${size ?? 'unknown'} clips`,
       usableSeconds:usable,
       blockedSeconds:postOpenObservation?.post_open_blocked_s ?? null,
-      immediateSave:{reason:'Not attempted: safe pre-open baseline unavailable under the read-gated procedure.'},
-      quietSave:move?.pass === true && Number.isFinite(move.ms) ? move.ms / 1000 : move?.reason ? {refused:/refus|not saved|error/i.test(move.reason), reason:move.reason} : null,
+      immediateSave:quickImmediate ? quickTools.quickSaveValue(quickImmediate) : {reason:'not observed'},
+      quietSave:quickQuiet ? quickTools.quickSaveValue(quickQuiet) : {reason:quickImmediateClean?'quiet arm not observed':'blocked by unverified immediate cleanup'},
     });
     record(row);
+    quickRowWritten=true;
     console.log('\nPlan 77 quick indicator (single fixture invocation)\n' + quickTools.formatQuickTable([row]));
   }
 } catch (error) {
   failed = true;
   console.error(`save-loop: ${error.message}`);
 } finally {
-  if (reducedOpening && !provisionalSeen) record({type:'post_open_blocked', post_open_blocked_s:null, attempts:0, outcome:'missing_ui_marker'});
+  if ((reducedOpening || quick) && !provisionalSeen) record({type:'post_open_blocked', post_open_blocked_s:null, attempts:0, outcome:'missing_ui_marker'});
   if (browser) await browser.close();
   if (probePromise) await probePromise.catch(()=>{});
+  if (quick && !quickRowWritten) {
+    const size=fixture.measurement?.clip_count??fixture.clips?.count??null;
+    const label=size===300&&fixture.measurement?.accepted_prefix_clip_count===300?'heavy seed history, worst case':`${size??'unknown'} clips`;
+    const row=quickTools.quickIndicatorRow({size,label,usableSeconds:null,blockedSeconds:postOpenObservation?.post_open_blocked_s??null,immediateSave:{reason:'opening or immediate arm did not complete'},quietSave:{reason:'quiet arm not attempted'}});
+    record(row);
+    console.log('\nPlan 77 quick indicator (single fixture invocation)\n'+quickTools.formatQuickTable([row]));
+  }
   console.table(rows.map(row => ({scenario:row.name, run:row.iteration, pass:row.pass, ms:row.ms, reason:row.reason || row.error})));
 }
 if (failed) process.exitCode = 1;

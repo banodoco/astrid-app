@@ -2,13 +2,28 @@
 
 ## Plan 77 quick indicator
 
-For one nonempty synthetic fixture, add `--reduced-opening --quick` to the
+For one synthetic fixture, add `--quick` to the
 direct `sweep.mjs` invocation. It writes a JSONL `quick_indicator` row to the
 results file and prints a compact table. The current guarded route measures
-the same-track move only after public-head corroboration, a warm reload and
-the cheap-read gate; it records the post-open immediate-save arm as
-`unobserved` instead of treating that delayed move as immediate. Empty fixture
-track-rename gestures are not yet supported by this quick mode.
+same-track move (or exact V1 track rename for the empty V1/A1 fixture) once
+from a captured pre-open public baseline and again only after the post-open
+read returns in under a second. It verifies Undo against the public snapshot
+between arms. If the read gate or Undo cannot be verified, the quiet arm is
+skipped and reported as unobserved.
+
+```sh
+SAVE_LOOP_BASE_URL=http://127.0.0.1:<port> \
+SAVE_LOOP_ROOT=/absolute/path/to/isolated-runtime-root \
+SAVE_LOOP_CHROME=/absolute/path/to/chrome \
+node scripts/save-loop/sweep.mjs --manifest /absolute/path/to/manifest.json \
+  --versions /absolute/path/to/versions.json \
+  --results /absolute/path/to/new-quick-results.jsonl --quick
+```
+
+Run once per fixture on the isolated local stack, choosing a new results file
+each time. The fixture's manifest must identify the exact synthetic project,
+timeline, track and clip IDs. The empty manifest must contain exactly V1 and A1;
+its single reversible edit is the V1 track-name change.
 
 Usable is works through 5 s, slow through 15 s, then broken. Save is works
 through 2 s, slow through 10 s, then broken; a refusal is broken and no Saved

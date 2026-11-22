@@ -305,6 +305,47 @@ export async function editScenarios(context) {
   return scenariosFor(context, 1);
 }
 
+function findTrackLabel(payload, trackId) {
+  const seen = new Set();
+  const visit = value => {
+    if (!value || typeof value !== 'object' || seen.has(value)) return null;
+    seen.add(value);
+    if (Array.isArray(value)) { for (const item of value) { const found = visit(item); if (found) return found; } return null; }
+    if (value.id === trackId && typeof value.label === 'string') return value.label;
+    for (const item of Object.values(value)) { const found = visit(item); if (found) return found; }
+    return null;
+  };
+  return visit(payload);
+}
+
+export function quickTrackRenameScenario(fixture) {
+  const trackId = fixture.tracks?.visual?.[0]?.id;
+  if (!trackId) throw new Error('quick empty fixture requires an exact first visual track ID');
+  let originalLabel, renamedLabel;
+  return {
+    name:'track-rename-same-track', expected:'saved', timeoutMs:60000,
+    async gesture({page, mark}) {
+      const field = page.locator(`[data-track-id="${trackId}"] input[aria-label="Track name"]`).first();
+      await field.waitFor({state:'visible', timeout:10000});
+      if (await field.isDisabled() || await field.getAttribute('readonly') !== null) throw new Error(`Track name input for ${trackId} is not writable`);
+      originalLabel = await field.inputValue();
+      renamedLabel = `${originalLabel} · quick ${fixture.timeline_id.slice(-8)}`;
+      await field.hover();
+      await field.fill(renamedLabel);
+      await field.press('Enter');
+      await field.blur();
+      mark();
+    },
+    verify({before, after}) {
+      const beforeLabel = findTrackLabel(before?.payload, trackId);
+      const afterLabel = findTrackLabel(after?.payload, trackId);
+      if (beforeLabel !== originalLabel || afterLabel !== renamedLabel) throw new Error(`public track ${trackId} label did not match the exact reversible rename`);
+      return {pass:true, evidence:{track_id:trackId, before:beforeLabel, after:afterLabel}};
+    },
+    cleanup:context => context.helpers.restoreScenario(context),
+  };
+}
+
 export async function repeatScenarios(context) {
   return [
     ...scenariosFor(context, 2).map((item) => ({ ...item, name: `${item.name} ×2` })),

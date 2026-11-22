@@ -377,29 +377,33 @@ async function attachDiagnostic(name: string, data: unknown): Promise<void> {
   catch (error) { console.log(`DIAG ${name} unavailable`, error instanceof Error ? error.name : 'error'); }
 }
 async function diagnoseTransitionControl(page: Page, name: string, openOptions: boolean): Promise<void> {
+  const data: Record<string, unknown> = { options: 'not opened' };
+  const control = transitionSelect(page).first();
   try {
-    const control = transitionSelect(page).first();
-    const state = await control.evaluate((node) => {
+    data.state = await control.evaluate((node) => {
       const safe = (v: unknown) => typeof v === 'string' && /^(cross-?fade|fade|__none__|None)$/.test(v) ? v : '<other>';
       let fiber = (node as any)[Object.keys(node).find((key) => key.startsWith('__reactFiber$')) ?? ''];
       let clip: any = null; let selectValue: unknown = null;
       for (let depth = 0; fiber && depth < 60; depth++, fiber = fiber.return) {
         const props = fiber.memoizedProps;
         if (selectValue === null && typeof props?.value === 'string') selectValue = safe(props.value);
-        if (props?.clip && typeof props.clip === 'object' && 'transition' in props.clip) { clip = props.clip; break; }
+        if (props?.clip && typeof props.clip === 'object' && typeof props.clip.id === 'string') { clip = props.clip; break; }
       }
       const t = clip?.transition; const transition: Record<string, unknown> = {};
       if (t && typeof t === 'object') {
         for (const key of ['id', 'type']) if (typeof t[key] === 'string') transition[key] = safe(t[key]);
         for (const key of ['duration', 'durationFrames']) if (typeof t[key] === 'number') transition[key] = t[key];
       }
-      return { renderedText: /cross[\s-]?fade/i.test(node.textContent ?? '') ? 'crossfade' : safe(node.textContent?.trim()), ariaExpanded: node.getAttribute('aria-expanded'),
-        selectValue, clipFound: !!clip, transition: t ? transition : null };
-    });
-    let options: unknown = 'not opened';
-    if (openOptions) {
+      const clipId = clip ? (/^(f2-transition-clip|f2-app-clip)$/.test(clip.id) ? clip.id : '<other>') : null;
+      return { renderedText: /cross[\s-]?fade/i.test(node.textContent ?? '') ? 'crossfade' : safe(node.textContent?.trim()),
+        ariaExpanded: node.getAttribute('aria-expanded'), selectValue, clipFound: !!clip, clipId,
+        transitionPresent: !!clip && Object.hasOwn(clip, 'transition'), transition: t ? transition : null };
+    }, undefined, { timeout: 3000 });
+  } catch (error) { data.stateError = error instanceof Error ? error.name : 'error'; }
+  if (openOptions) {
+    try {
       await control.click({ timeout: 3000 });
-      options = await page.getByRole('option').evaluateAll((nodes) => nodes.map((node) => ({
+      data.options = await page.getByRole('option').evaluateAll((nodes) => nodes.map((node) => ({
         label: /cross[\s-]?fade/i.test(node.textContent ?? '') ? 'crossfade' : '<other>',
         value: (() => {
           const key = Object.keys(node).find((candidate) => candidate.startsWith('__reactFiber$'));
@@ -408,19 +412,33 @@ async function diagnoseTransitionControl(page: Page, name: string, openOptions: 
           return typeof value === 'string' && /^(cross-?fade|fade|__none__)$/.test(value) ? value : '<other-or-unavailable>';
         })(),
       })));
-      await page.keyboard.press('Escape');
-    }
-    await attachDiagnostic(name, { ...state, options });
-  } catch (error) { await attachDiagnostic(name, { unavailable: error instanceof Error ? error.name : 'error' }); }
+    } catch (error) { data.optionsError = error instanceof Error ? error.name : 'error'; }
+    finally { try { await page.keyboard.press('Escape'); } catch { /* Page may have closed. */ } }
+  }
+  await attachDiagnostic(name, data);
 }
 async function diagnoseRecovery(page: Page, name: string): Promise<void> {
+  const data: Record<string, unknown> = {};
+  try {
+    data.roles = await page.evaluate(() => Array.from(document.querySelectorAll('[role="alert"], [role="status"], [role="alertdialog"]'))
+      .filter((node) => { const rect = node.getBoundingClientRect(); return rect.width > 0 && rect.height > 0; })
+      .slice(0, 10).map((node) => ({
+        role: node.getAttribute('role'),
+        text: /You have unsaved changes/i.test(node.textContent ?? '') ? 'You have unsaved changes'
+          : /This timeline changed somewhere else/i.test(node.textContent ?? '') ? 'This timeline changed somewhere else' : '<other>',
+        buttons: Array.from(node.querySelectorAll('button')).slice(0, 10).map((button) => {
+          const text = button.textContent?.trim() ?? '';
+          return /^(Save them|Try again|Restore|Discard|Keep my changes|Use latest version)$/.test(text) ? text : '<other>';
+        }),
+      })));
+  } catch (error) { data.rolesError = error instanceof Error ? error.name : 'error'; }
+  await attachDiagnostic(name, data);
   try {
     const alert = page.getByRole('alert').filter({ hasText: 'You have unsaved changes' }).first();
-    const data = { visible: await alert.isVisible(), buttons: await alert.getByRole('button').allTextContents()
-      .then((values) => values.map((v) => /^(Save them|Try again|Restore|Discard)$/.test(v.trim()) ? v.trim() : '<other>')) };
-    await attachDiagnostic(name, data);
-    if (data.visible) await test.info().attach(`${name}-alert`, { body: await alert.screenshot(), contentType: 'image/png' });
-  } catch (error) { await attachDiagnostic(name, { unavailable: error instanceof Error ? error.name : 'error' }); }
+    const screenshot = await alert.isVisible() ? await alert.screenshot({ timeout: 3000, mask: [alert] })
+      : await page.screenshot({ timeout: 3000, clip: { x: 0, y: 0, width: 320, height: 160 }, mask: [page.locator('body')] });
+    await test.info().attach(`${name}-redacted`, { body: screenshot, contentType: 'image/png' });
+  } catch (error) { await attachDiagnostic(`${name}-screenshot`, { unavailable: error instanceof Error ? error.name : 'error' }); }
 }
 
 async function selectClip(page: Page, clipId: string) {

@@ -35,7 +35,8 @@ async function exitedWithin(proc, ms) {
 }
 export async function open({onCleanup} = {}){
   checkDisk();
-  const profile=fs.mkdtempSync(path.join(os.tmpdir(),'save-loop-'));
+  const browserScratch=fs.mkdtempSync(path.join('/tmp','sl-'));
+  const profile=browserScratch;
   let proc, browser;
   async function close(){
     try {
@@ -53,12 +54,12 @@ export async function open({onCleanup} = {}){
           await exitedWithin(proc, 2000);
         }
       }
-      fs.rmSync(profile,{recursive:true,force:true});
+      fs.rmSync(browserScratch,{recursive:true,force:true,maxRetries:8,retryDelay:100});
     }
   }
   if (onCleanup) onCleanup(close);
   try {
-    proc=spawn(CHROME,['--headless=new',...(process.getuid?.() === 0 ? ['--no-sandbox'] : []),'--remote-debugging-port=0','--user-data-dir='+profile,'--disk-cache-size=1','--media-cache-size=1','--no-first-run','--window-size=1700,1500','about:blank'],{stdio:'ignore'});
+    proc=spawn(CHROME,['--headless=new',...(process.getuid?.() === 0 ? ['--no-sandbox'] : []),'--remote-debugging-port=0','--user-data-dir='+profile,'--disk-cache-size=1','--media-cache-size=1','--no-first-run','--window-size=1700,1500','about:blank'],{stdio:'ignore',env:{...process.env,TMPDIR:browserScratch}});
     let ready=false, port;
     let spawnError; proc.on('error', error=>{spawnError=error;});
     for(let i=0;i<40;i++){
@@ -79,7 +80,13 @@ export async function open({onCleanup} = {}){
     await p.waitForFunction(()=>[...document.querySelectorAll('div')].some(e=>e.children.length===0&&/^saved$/i.test(e.textContent||'')),null,{timeout:60000});
     await p.waitForTimeout(15000);
     return {b:{close},p,ev,context:ctx};
-  } catch(error) { await close(); throw error; }
+  } catch(error) {
+    try { await close(); }
+    catch(cleanupError) {
+      error.message = `${error.message}; browser cleanup also failed: ${cleanupError.message}`;
+    }
+    throw error;
+  }
 }
 export async function badge(p){ return await p.evaluate(()=>{ for(const e of document.querySelectorAll('div,span,button')){ if(e.children.length===0){ const t=(e.textContent||'').trim(); if(/^(saved|saving\.*|not saved|error|unsaved\.*|save failed)$/i.test(t)) return t.toLowerCase(); } } return '?'; }); }
 // run a gesture, wait for settle, return result

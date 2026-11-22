@@ -891,65 +891,68 @@ export class RuntimeDataProvider implements DataProvider {
     return verified;
   }
 
-  /** Public verified history pins plus scoped immutable reads, never projected rows. */
-  async loadTimelineCommandBasis(timelineId: string): Promise<TimelineCommandBasis> {
-    const observe = timelineBasisDiagnostics(this);
-    const finishLoader = observe('loader');
-    // Immutable reads are complete only when their assembled closure validates.
-    const pendingReads: Array<(completed: boolean) => void> = [];
-    try {
-      const requireHead = (page: HistoryPage): HistoryPage['head'] => {
+  private async readTimelineHistory(
+    timelineId: string,
+    observe: ReturnType<typeof timelineBasisDiagnostics>,
+    options?: { headOnly?: boolean; expectedHead?: TimelineAcceptedIdentity },
+  ): Promise<{ head: HistoryPage['head']; history?: HistoryPage }> {
+    const readPage = async (cursor?: string, captured?: HistoryPage['head']) => {
+      const finish = observe('history');
+      try {
+        const page = await this.listTimelineCommits(timelineId, cursor, options?.headOnly ? 1 : undefined);
         const head = page?.head;
         if (!head || typeof head.revision_id !== 'string' || !head.revision_id
           || typeof head.publication_id !== 'string' || !head.publication_id) {
           throw new TimelineSchemaIncompatibleError('Workspace Runtime returned a malformed timeline history head');
         }
-        return head;
-      };
-      const finishFirstHistory = observe('history');
-      let firstHistory;
-      let firstHead;
-      try {
-        firstHistory = await this.listTimelineCommits(timelineId);
-        firstHead = requireHead(firstHistory);
-        finishFirstHistory(true);
+        if (captured && (head.revision_id !== captured.revision_id || head.publication_id !== captured.publication_id)) {
+          throw new TimelineSchemaIncompatibleError('Workspace Runtime changed the captured timeline history head');
+        }
+        finish(true);
+        return page;
       } catch (error) {
-        finishFirstHistory(false);
+        finish(false);
         throw error;
       }
-      const pages = [firstHistory];
-      const seenCursors = new Set<string>();
-      while (pages[pages.length - 1]!.next_cursor !== null) {
-        const cursor = pages[pages.length - 1]!.next_cursor!;
-        if (seenCursors.has(cursor)) {
-          throw new TimelineSchemaIncompatibleError('Workspace Runtime returned a cyclic timeline history cursor');
-        }
-        seenCursors.add(cursor);
-        const finishNextPage = observe('history');
-        let nextPage;
-        try {
-          nextPage = await this.listTimelineCommits(timelineId, cursor);
-          const nextHead = requireHead(nextPage);
-          if (nextHead.revision_id !== firstHead.revision_id
-            || nextHead.publication_id !== firstHead.publication_id) {
-            throw new TimelineSchemaIncompatibleError('Workspace Runtime changed the captured timeline history head');
-          }
-          finishNextPage(true);
-        } catch (error) {
-          finishNextPage(false);
-          throw error;
-        }
-        pages.push(nextPage);
+    };
+    const first = await readPage();
+    const { head } = first;
+    const expected = options?.expectedHead;
+    if (expected && (head.revision_id !== expected.revisionId || head.publication_id !== expected.publicationId)) {
+      return { head };
+    }
+    if (options?.headOnly) {
+      // The first item may be the oldest publication. Only the envelope pins the head.
+      return { head, ...(first.next_cursor === null ? { history: first } : {}) };
+    }
+    const pages = [first];
+    const seenCursors = new Set<string>();
+    let cursor = first.next_cursor;
+    while (cursor !== null) {
+      if (seenCursors.has(cursor)) {
+        throw new TimelineSchemaIncompatibleError('Workspace Runtime returned a cyclic timeline history cursor');
       }
-      const history: HistoryPage = {
-        ...firstHistory,
-        items: pages.flatMap((page) => page.items),
-        next_cursor: null,
-      };
-      const head = history.head;
-      if (!head?.revision_id || !head.publication_id) {
-        throw new TimelineSchemaIncompatibleError('Timeline has no verified authoring history head');
-      }
+      seenCursors.add(cursor);
+      const next = await readPage(cursor, head);
+      pages.push(next);
+      cursor = next.next_cursor;
+    }
+    return { head, history: { ...first, items: pages.flatMap(page => page.items), next_cursor: null } };
+  }
+
+  async loadTimelineCommandHistory(timelineId: string, expectedHead: TimelineAcceptedIdentity): Promise<HistoryPage | undefined> {
+    const { history } = await this.readTimelineHistory(timelineId, timelineBasisDiagnostics(this), { expectedHead });
+    return history;
+  }
+
+  /** Public verified history pins plus scoped immutable reads. */
+  async loadTimelineCommandBasis(timelineId: string, options?: { history: 'head' }): Promise<TimelineCommandBasis> {
+    const observe = timelineBasisDiagnostics(this);
+    const finishLoader = observe('loader');
+    // Immutable reads are complete only when their assembled closure validates.
+    const pendingReads: Array<(completed: boolean) => void> = [];
+    try {
+      const { head, history } = await this.readTimelineHistory(timelineId, observe, { headOnly: options?.history === 'head' });
       const finishParent = observe('parent');
       pendingReads.push(finishParent);
       const parent = await this.readParentCompositionAtHead(this.projectId, timelineId, head.revision_id);
@@ -989,7 +992,8 @@ export class RuntimeDataProvider implements DataProvider {
           dependency_manifest: manifest };
       const canonicalDocument = validateAcceptedCanonicalDocument(raw as CanonicalDocument, this.projectId, timelineId, head.revision_id);
       const result = {
-        head: { revisionId: head.revision_id, publicationId: head.publication_id }, canonicalDocument, history,
+        head: { revisionId: head.revision_id, publicationId: head.publication_id }, canonicalDocument,
+        ...(history === undefined ? {} : { history }),
         graph: runtimeGraphToContractFromCanonicalDocument(this.projectId, timelineId, canonicalDocument, head.publication_id),
       };
       for (const finish of pendingReads) finish(true);

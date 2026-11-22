@@ -1,91 +1,157 @@
 /*
- * Save-loop sweep: drives the video editor through timeline gestures (move, trim, split,
- * mute, delete, inspector, audio, tracks, shots, undo/redo, file drops, repeats) and records
- * for each one the save badge, the POSTs to /commit and any toast. One JSON line per gesture
- * is appended to the results file. Needs a running editor, Runtime and Chrome; it creates
- * and reverts edits on the timeline it opens, so point it at a sandbox timeline.
+ * Plan 77 live save-loop matrix. Run only against the synthetic fixture on the
+ * isolated SL-1 stack. Each descriptor is measured three times; its cleanup is
+ * required so a later row does not inherit an earlier row's edits.
  *
- * Usage: node scripts/save-loop/sweep.mjs [--state loaded|after-upload] [--video-clip ID] [--audio-clip ID] [--help]
- *   --state        loaded (default) runs on the timeline as opened; after-upload first drops a PNG
- *                  onto the Type row and targets the clip it creates
- *   --video-clip   clip id moved/trimmed/split in the video rows (default clip-2)
- *   --audio-clip   clip id moved/trimmed/muted/deleted in the audio rows (default music-song)
- * Environment (read by lib.mjs): SAVE_LOOP_CHROME, SAVE_LOOP_BASE_URL, SAVE_LOOP_PROJECT,
- *   SAVE_LOOP_TIMELINE (required); SAVE_LOOP_PLAYWRIGHT, SAVE_LOOP_CDP_PORT_BASE, SAVE_LOOP_RESULTS (optional).
- * Coordinates assume the 1700x1500 viewport set in lib.mjs. Track row ids (type, fx, picture,
- * sprite, plate, sfx) are the editor's data-row-id values for the timeline layout the sweep was written against.
+ * SAVE_LOOP_CHROME=/usr/bin/google-chrome \
+ * SAVE_LOOP_PLAYWRIGHT=/opt/node-tools/node_modules/playwright/index.mjs \
+ * SAVE_LOOP_BASE_URL=http://127.0.0.1:PORT \
+ * node scripts/save-loop/sweep.mjs --manifest /path/to/manifest.json \
+ *   --results /path/to/round.jsonl --versions /path/to/versions.json
+ *
+ * The versions JSON must identify the actual App, Agent and Runtime revisions.
+ * Results are appended; choose a new file for each round.
  */
-const USAGE=`Usage: node scripts/save-loop/sweep.mjs [--state loaded|after-upload] [--video-clip ID] [--audio-clip ID]
-Environment: SAVE_LOOP_CHROME, SAVE_LOOP_BASE_URL, SAVE_LOOP_PROJECT, SAVE_LOOP_TIMELINE (required)
-             SAVE_LOOP_PLAYWRIGHT, SAVE_LOOP_CDP_PORT_BASE, SAVE_LOOP_RESULTS (optional)`;
-const argv=process.argv.slice(2);
-const flag=(name,dflt)=>{ const i=argv.indexOf(name); if(i<0) return dflt; const v=argv[i+1]; if(!v||v.startsWith('--')) throw new Error(`${name} needs a value`); return v; };
-if(argv.includes('--help')||argv.includes('-h')){ console.log(USAGE); process.exit(0); }
-const STATE=flag('--state','loaded');  // loaded | after-upload
-if(!['loaded','after-upload'].includes(STATE)) throw new Error(`--state must be loaded or after-upload, got ${STATE}`);
-const VIDEO_CLIP=flag('--video-clip','clip-2');
-const AUDIO_CLIP=flag('--audio-clip','music-song');
-const {open,act,rect,rowY,drag,dropFile,clipIds,badge}=await import('./lib.mjs');
-let {b,p}=await open();
-const tag=n=>`[${STATE}] ${n}`;
-async function reload(){ await b.close(); ({b,p}=await open()); }
-async function row(name,doit,{undo=true,undoName}={}){
-  try{
-    const r=await act(p,tag(name),doit);
-    const ok=r.posts.some(x=>/commit$/.test(x.u)&&x.s===200)&&r.badge==='saved';
-    if(ok&&undo){ await act(p,tag((undoName||name)+' -> UNDO'),async()=>{await p.keyboard.press('Control+z');}); }
-    else if(!ok){ await reload(); }
-  }catch(e){ console.log('ROWERR',name,e.message.slice(0,200)); try{await reload();}catch{} }
+import fs from 'fs';
+
+const usage = 'Usage: node scripts/save-loop/sweep.mjs --manifest FILE --results FILE --versions FILE [--broken-probe|--broken-probe-only]';
+const args = process.argv.slice(2);
+if (args.includes('--help') || args.includes('-h')) { console.log(usage); process.exit(0); }
+function flag(name) {
+  const index = args.indexOf(name);
+  const value = args[index + 1];
+  if (index < 0 || !value || value.startsWith('--')) throw new Error(`${name} is required. ${usage}`);
+  return value;
 }
-const sel=async id=>{const r=await rect(p,id); await p.mouse.click(r.x+r.w/2,r.y+r.h/2); await p.waitForTimeout(500); return r;};
-const ids=await clipIds(p); console.log(JSON.stringify(ids));
-let T=VIDEO_CLIP;
-if(STATE==='after-upload'){
-  const before=new Set(await clipIds(p));
-  const y=await rowY(p,'type');
-  await row('drop PNG file onto Type row (setup, keep)',async()=>{await dropFile(p,600,y);},{undo:false});
-  const after=await clipIds(p); const nw=after.filter(x=>!before.has(x)); console.log('NEW',nw);
-  const n=nw.find(x=>x.endsWith('@type'))||nw[0]; if(n) T=n.split('@')[0];
-  await p.waitForTimeout(2000);
+const probeOnly = args.includes('--broken-probe-only');
+const manifestPath = flag('--manifest');
+const resultsPath = flag('--results');
+const versionsPath = flag('--versions');
+const fixture = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+const versions = JSON.parse(fs.readFileSync(versionsPath, 'utf8'));
+if (!fixture.project_id || !fixture.timeline_id || (!probeOnly && (!fixture.tracks || !fixture.clips || !fixture.media)))
+  throw new Error('fixture manifest lacks project, timeline, tracks, clips or media');
+if (!versions.app || !versions.agent || !versions.runtime)
+  throw new Error('versions JSON must identify app, agent and runtime');
+if (!process.env.SAVE_LOOP_BASE_URL || !process.env.SAVE_LOOP_CHROME)
+  throw new Error('SAVE_LOOP_BASE_URL and SAVE_LOOP_CHROME are required');
+if (fs.existsSync(resultsPath)) throw new Error('results file already exists; use a new file for each round');
+process.env.SAVE_LOOP_PROJECT = fixture.project_id;
+process.env.SAVE_LOOP_TIMELINE = fixture.timeline_id;
+const baseUrl = process.env.SAVE_LOOP_BASE_URL;
+const origin = new URL(baseUrl);
+if (!['localhost','127.0.0.1','[::1]'].includes(origin.hostname)) throw new Error('save-loop requires a local isolated stack');
+const helpers = await import('./lib.mjs');
+const {createRecorder, publicSnapshot} = await import('./assert.mjs');
+const {expectedFixtureIds, sameIds} = await import('./readiness.mjs');
+let browser;
+for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]]) {
+  process.once(signal, async () => {
+    try { if (browser) await browser.close(); } finally { process.exit(code); }
+  });
 }
-console.log('TARGET',T);
-const targetRow=async()=>(await p.evaluate(i=>document.querySelector(`[data-clip-id="${i}"]`)?.getAttribute('data-row-id'),T));
-await row(`move ${T} same track (drag +120px)`,async()=>{const r=await sel(T);await drag(p,r.x+r.w/2,r.y+r.h/2,r.x+r.w/2+120,r.y+r.h/2);});
-await row(`move ${T} cross-track to Fx (drag)`,async()=>{const r=await sel(T);await drag(p,r.x+r.w/2,r.y+r.h/2,r.x+r.w/2,await rowY(p,'fx'));});
-await row(`move ${T} onto shot track Picture (drag)`,async()=>{const r=await sel(T);await drag(p,r.x+r.w/2,r.y+r.h/2,r.x+r.w/2,await rowY(p,'picture'));});
-await row(`keyboard move ${T} track ArrowDown`,async()=>{await sel(T);await p.keyboard.press('ArrowDown');});
-await row(`keyboard nudge ${T} Alt+Right`,async()=>{await sel(T);await p.keyboard.press('Alt+ArrowRight');});
-await row(`trim ${T} right edge (drag -40px)`,async()=>{const r=await rect(p,T);const x=r.x+r.w-3;await drag(p,x,r.y+r.h/2,x-40,r.y+r.h/2);});
-await row(`trim ${T} left edge (drag +30px)`,async()=>{const r=await rect(p,T);const x=r.x+3;await drag(p,x,r.y+r.h/2,x+30,r.y+r.h/2);});
-await row(`split ${T} at playhead ('s')`,async()=>{const r=await sel(T);await p.mouse.click(r.x+r.w/2,985);await p.waitForTimeout(400);await p.keyboard.press('s');});
-await row(`mute ${T} ('m')`,async()=>{await sel(T);await p.keyboard.press('m');});
-await row(`delete ${T} (Delete key)`,async()=>{await sel(T);await p.keyboard.press('Delete');});
-// inspector edits
-await row(`inspector: set a numeric field on ${T}`,async()=>{await sel(T);const inp=p.locator('input[type=number]').first();await inp.click();await inp.fill('7');await inp.press('Tab');});
-// audio
-await row(`move audio ${AUDIO_CLIP} (drag +60px)`,async()=>{const r=await rect(p,AUDIO_CLIP);await drag(p,r.x+r.w/2,r.y+r.h/2,r.x+r.w/2+60,r.y+r.h/2);});
-await row(`trim audio ${AUDIO_CLIP} right edge (-30px)`,async()=>{const r=await rect(p,AUDIO_CLIP);const x=r.x+r.w-3;await drag(p,x,r.y+r.h/2,x-30,r.y+r.h/2);});
-await row(`mute audio ${AUDIO_CLIP} (m)`,async()=>{await sel(AUDIO_CLIP);await p.keyboard.press('m');});
-await row(`delete audio ${AUDIO_CLIP}`,async()=>{await sel(AUDIO_CLIP);await p.keyboard.press('Delete');});
-await row('move audio clip to Sfx track (drag)',async()=>{const r=await rect(p,AUDIO_CLIP);await drag(p,r.x+r.w/2,r.y+r.h/2,r.x+r.w/2,await rowY(p,'sfx'));});
-// tracks
-await row('add video track (+ Video)',async()=>{await p.getByText('+ Video',{exact:false}).first().click();});
-await row('rename track Fx label',async()=>{const y=await rowY(p,'fx');await p.mouse.click(60,y); await p.mouse.click(112,y);await p.waitForTimeout(500);const inp=p.locator('input[type=text]:visible').first();await inp.fill('FxRen');await inp.press('Enter');});
-await row('reorder track (drag Sprite handle down)',async()=>{const y=await rowY(p,'sprite');await drag(p,88,y,88,y+40);});
-await row('remove empty track Plate (x button)',async()=>{const y=await rowY(p,'plate');await p.mouse.move(60,y);await p.locator('button[title="Remove track"]').nth(5).click({force:true});});
-// shots
-await row('shot move: drag Picture shot 2 left',async()=>{await drag(p,700,1022,500,1022);});
-await row('shot trim: drag boundary right edge of shot 1 (-40px)',async()=>{await drag(p,445,1022,405,1022);});
-await row('shot select + delete',async()=>{await p.mouse.click(300,1022);await p.keyboard.press('Delete');});
-// undo/redo
-await row('redo path: nudge, undo, redo',async()=>{await sel(T);await p.keyboard.press('Alt+ArrowRight');await p.waitForTimeout(15000);await p.keyboard.press('Control+z');await p.waitForTimeout(15000);await p.keyboard.press('Control+Shift+z');},{undoName:'redo'});
-// drop
-{ const y=await rowY(p,'sprite');
-  await row('drop PNG file onto Sprite row',async()=>{await dropFile(p,700,y);}); }
-// repeats
-await row(`REPEAT x3 move ${T} (3 quick drags)`,async()=>{for(let i=0;i<3;i++){const r=await rect(p,T);await drag(p,r.x+r.w/2,r.y+r.h/2,r.x+r.w/2+40,r.y+r.h/2);await p.waitForTimeout(300);}},{undo:false});
-await row(`REPEAT x3 trim ${T} right edge`,async()=>{for(let i=0;i<3;i++){const r=await rect(p,T);const x=r.x+r.w-3;await drag(p,x,r.y+r.h/2,x-15,r.y+r.h/2);await p.waitForTimeout(300);}},{undo:false});
-{ const y=await rowY(p,'plate');
-  await row('REPEAT x3 drop PNG on Plate',async()=>{for(let i=0;i<3;i++){await dropFile(p,300+i*120,y,`sweep${i}.png`);await p.waitForTimeout(400);}},{undo:false}); }
-console.log('FINAL', JSON.stringify(await clipIds(p)));
-await b.close();
+let failed = false;
+const rows = [];
+try {
+  const {b, p: page, context, cpu, opening} = await helpers.open({fixture:probeOnly ? undefined : fixture, onCleanup: close => { browser = {close}; }});
+  browser = b;
+  let secondPage;
+  const project = await page.evaluate(async projectId => {
+    const response = await fetch(`/api/runtime/v1/projects/${encodeURIComponent(projectId)}`, {credentials:'same-origin', cache:'no-store'});
+    if (!response.ok) throw new Error(`sandbox project read failed (${response.status})`);
+    const body = await response.json(); return body?.data ?? body;
+  }, fixture.project_id);
+  if (project.project_id !== fixture.project_id || project.metadata?.purpose !== 'synthetic Plan 77 save-loop fixture')
+    throw new Error('project is not the synthetic Plan 77 sandbox fixture');
+  fs.appendFileSync(resultsPath, JSON.stringify({type:'run', date:new Date().toISOString(), versions, project_id:fixture.project_id, timeline_id:fixture.timeline_id, manifest:manifestPath}) + '\n');
+  if (opening) {
+    const head = await publicSnapshot(page, baseUrl, fixture);
+    const idsMatch = sameIds(head.clipIds, expectedFixtureIds(fixture));
+    opening.public_head = {project_id:head.project_id, timeline_id:head.timeline_id, revision:head.headRevision, publication:head.publicationId, exact_clip_ids:idsMatch};
+    opening.full_ui_and_public_head_match = Boolean(opening.full_ui_saved && idsMatch && opening.head_before_ui.revision === head.headRevision && opening.head_before_ui.publication === head.publicationId);
+    opening.full_open_corroborated = opening.full_ui_and_public_head_match;
+    opening.full_open_ms = opening.full_open_corroborated ? opening.full_ui_saved.ui_saved_ms : null;
+    opening.full_open_target_pass = opening.full_open_ms === null ? null : opening.full_open_ms <= opening.target_full_open_ms;
+    opening.full_open_confirmed = false;
+    opening.limitation = opening.full_open_corroborated ? 'Exact UI IDs and tracks with sampled stable Saved agree with an unchanged public head and exact clip IDs. The editor does not independently expose its rendered head identity.' : opening.limitation + ' The editor does not independently expose its rendered head identity.';
+    fs.appendFileSync(resultsPath, JSON.stringify(opening)+'\n');
+    if (!idsMatch) throw new Error('public head clip IDs do not match expected fixture');
+  }
+  const recorder = await createRecorder(page, {fixture, baseUrl, resultsPath, allowEmpty:probeOnly});
+  let descriptors = [];
+  if (!probeOnly) {
+    secondPage = await context.newPage();
+    await secondPage.setViewportSize({width:1700, height:1500});
+    await secondPage.goto(helpers.URL_);
+    const {editScenarios, repeatScenarios} = await import('./edits.mjs');
+    const {dropScenarios} = await import('./drops.mjs');
+    const {clashScenario} = await import('./clash.mjs');
+    const contextArgs = {page, fixture, helpers};
+    descriptors = [
+      ...await editScenarios(contextArgs),
+      ...await repeatScenarios(contextArgs),
+      ...await dropScenarios(contextArgs),
+      await clashScenario({...contextArgs, secondPage}),
+    ];
+  }
+  if (args.includes('--broken-probe') || probeOnly) descriptors.push({
+    name:'deliberately broken no-op probe', expected:'saved', timeoutMs:1000,
+    gesture:async()=>{}, cleanup:context=>context.helpers.restoreScenario(context),
+  });
+  let firstAcceptedReported = false;
+  for (const descriptor of descriptors) {
+    if (!descriptor || typeof descriptor.name !== 'string' || typeof descriptor.gesture !== 'function' ||
+        !['saved','clash'].includes(descriptor.expected) || typeof descriptor.cleanup !== 'function') {
+      throw new Error(`invalid scenario descriptor or missing cleanup: ${descriptor?.name || '<unnamed>'}`);
+    }
+    const measurements = [];
+    for (let iteration=1; iteration<=3; iteration++) {
+      let row;
+      const scenarioStart=cpu?.mark();
+      try {
+        row = await recorder.runRow({...descriptor, iteration});
+        row = {...row, name:descriptor.name, iteration};
+        rows.push(row);
+        measurements.push(row);
+        if (row?.pass !== true) failed = true;
+      } catch (error) {
+        failed = true;
+        row = {name:descriptor.name, iteration, pass:false, error:String(error?.message || error)};
+        rows.push(row);
+        measurements.push(row);
+        fs.appendFileSync(resultsPath, JSON.stringify({type:'row', ...row}) + '\n');
+      }
+      if (cpu) fs.appendFileSync(resultsPath, JSON.stringify({type:'cpu', name:descriptor.name, iteration, ...cpu.delta(scenarioStart,'scenario')})+'\n');
+      const cleanupStart=cpu?.mark();
+      try {
+        const cleanup = await descriptor.cleanup({page, secondPage, fixture, helpers, result:row});
+        fs.appendFileSync(resultsPath, JSON.stringify({type:'cleanup', name:descriptor.name, iteration, result:cleanup ?? null, cpu:cpu?.delta(cleanupStart,'cleanup') ?? null}) + '\n');
+        if (!firstAcceptedReported && descriptor.expected === 'saved' && row?.pass === true && cleanup?.changed === true) {
+          fs.appendFileSync(resultsPath, JSON.stringify({type:'first_accepted_scenario', name:descriptor.name, iteration, gesture_to_saved_ms:row.ms, restored_content_verified:true, limitation:'Ordinary matrix row after opening; not part of cold-open timing or CPU.'})+'\n');
+          firstAcceptedReported = true;
+        }
+      } catch (error) {
+        const failure = {type:'cleanup_failure', name:descriptor.name, iteration, error:String(error?.message || error), cpu:cpu?.delta(cleanupStart,'cleanup') ?? null};
+        fs.appendFileSync(resultsPath, JSON.stringify(failure) + '\n');
+        throw new Error(`cleanup failed for ${descriptor.name}: ${failure.error}`);
+      }
+    }
+    if (descriptor.expected === 'saved') {
+      const durations = measurements.map(row => row.ms);
+      const valid = durations.length === 3 && durations.every(Number.isFinite);
+      const sorted = [...durations].sort((a,b)=>a-b);
+      const timingPass = valid && sorted[1] <= 2000 && sorted[2] <= 4000;
+      const summary = {type:'scenario_summary', name:descriptor.name, durations_ms:durations, median_ms:valid ? sorted[1] : null, timing_pass:timingPass};
+      fs.appendFileSync(resultsPath, JSON.stringify(summary) + '\n');
+      if (!timingPass) failed = true;
+    }
+  }
+  if (typeof recorder.finish === 'function') await recorder.finish();
+} catch (error) {
+  failed = true;
+  console.error(`save-loop: ${error.message}`);
+} finally {
+  if (browser) await browser.close();
+  console.table(rows.map(row => ({scenario:row.name, run:row.iteration, pass:row.pass, ms:row.ms, reason:row.reason || row.error})));
+}
+if (failed) process.exitCode = 1;

@@ -29,6 +29,7 @@
     top: 68px;
     height: calc(100vh - 68px);
     height: calc(100svh - 68px);
+    overflow: clip;
   }
   .astrid-vision-planet-pin > .astrid-vision-planet {
     transform: translate(20vw, 110px);

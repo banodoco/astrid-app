@@ -337,12 +337,17 @@ function TimelineEditorShellCoreComponent({
     if (chrome.loadError) chrome.retryLoad();
     if (chrome.saveStatus === 'error' || chrome.saveStatus === 'dirty') chrome.retryPendingSave();
   });
+  const guardedConflict = !!chrome.saveBar?.guardedConflict && !chrome.recoveryDraft;
+  const keepTimelineConflict = guardedConflict ? chrome.tryAgain : chrome.retrySaveAfterConflict;
+  const discardTimelineConflict = guardedConflict ? chrome.discardUnsaved
+    : () => chrome.reloadFromServer({ discardRefusedSave: true });
   const conflict = useTimelineRealtime({
     timelineId,
-    conflictExhausted: !chrome.saveBar && !chrome.permanentSaveRejection && chrome.isConflictExhausted,
-    onKeepLocalChanges: chrome.retrySaveAfterConflict,
-    onDiscardRemoteChanges: () => chrome.reloadFromServer({ discardRefusedSave: true }),
+    conflictExhausted: !chrome.permanentSaveRejection && (guardedConflict || (!chrome.saveBar && chrome.isConflictExhausted)),
+    onKeepLocalChanges: keepTimelineConflict,
+    onDiscardRemoteChanges: discardTimelineConflict,
   });
+  const showConflictDialog = conflict.isOpen && !chrome.permanentSaveRejection && (guardedConflict || !chrome.saveBar);
 
   useEffect(() => {
     bootDiagnostics();
@@ -823,15 +828,15 @@ function TimelineEditorShellCoreComponent({
   // the way back to the choice once it was dismissed.
   const conflictActions = (
     <div className="flex items-center gap-2">
-      <Button type="button" size="sm" variant="outline" onClick={() => void chrome.reloadFromServer({ discardRefusedSave: true })}>
+      <Button type="button" size="sm" variant="outline" onClick={() => void discardTimelineConflict()}>
         {TIMELINE_CONFLICT_USE_LATEST}
       </Button>
-      <Button type="button" size="sm" onClick={chrome.retrySaveAfterConflict}>
+      <Button type="button" size="sm" onClick={keepTimelineConflict}>
         {TIMELINE_CONFLICT_KEEP_MINE}
       </Button>
     </div>
   );
-  const conflictBanner = chrome.isConflictExhausted && !chrome.permanentSaveRejection && !conflict.isOpen && !chrome.saveBar
+  const conflictBanner = !chrome.permanentSaveRejection && (guardedConflict || (chrome.isConflictExhausted && !chrome.saveBar))
     ? <SaveBar bar={{ kind: 'refused', headline: TIMELINE_CONFLICT_SENTENCE, action: 'conflict' }}
         actions={conflictActions} className="border-border bg-muted/40 text-foreground" />
     : null;
@@ -876,6 +881,8 @@ function TimelineEditorShellCoreComponent({
 
   const renderSaveSurface = (): ReactNode => {
     if (chrome.permanentSaveRejection) return <TimelineSaveNotice />;
+    if (showConflictDialog) return null;
+    if (guardedConflict) return conflictBanner;
     if (chrome.recoveryRestoreAllowed && chrome.recoveryDraft) {
       return <SaveBar bar={{ kind: 'recovered', headline: 'We kept your unsaved edit.', action: 'draft' }}
         onTryAgain={chrome.retryRecoveredDraft} onDiscard={chrome.discardRecoveredDraft} restore />;
@@ -905,8 +912,8 @@ function TimelineEditorShellCoreComponent({
           onTryAgain={drop.tryAgain} onDiscard={drop.discard} />
       ))}
       {saveSurface}
-      {!saveSurface && !chrome.saveBar && !chrome.permanentSaveRejection ? <TimelineSaveNotice /> : null}
-      <AlertDialog open={Boolean(conflict.isOpen && !chrome.saveBar && !chrome.permanentSaveRejection)} onOpenChange={(open) => { if (!open) conflict.setOpen(false); }}>
+      {!saveSurface && !showConflictDialog && !chrome.saveBar && !chrome.permanentSaveRejection ? <TimelineSaveNotice /> : null}
+      <AlertDialog open={showConflictDialog} onOpenChange={(open) => { if (!open) conflict.setOpen(false); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>This timeline changed somewhere else</AlertDialogTitle>

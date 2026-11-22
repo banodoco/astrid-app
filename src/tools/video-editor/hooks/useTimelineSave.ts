@@ -620,7 +620,7 @@ export function useTimelineSave(
   // One-slot recovery draft (plan-v5 B9): after the timeline data loads, offer
   // any draft left by a crash / offline edit / save-as-copy. Offered once per
   // mount; the shell renders Retry / Discard.
-  const [recoveryDraft, setRecoveryDraft] = useState<{
+  const [recoveryOffer, setRecoveryDraft] = useState<{
     updatedAt: string;
     baseVersion: number;
     retryAllowed: boolean;
@@ -820,12 +820,16 @@ export function useTimelineSave(
         setRecoveryActionRefused(true);
         return;
       }
-      if (localDocumentSave && localOwner.recovered && localOwner.session?.getState().status === 'conflict') {
-        // Native recovery already owns the original intents and refusal. Trying
-        // to capture the one-slot draft again can fail before the conflict UI is
-        // reached (and must never rebase it onto the newly displayed head).
+      const recoveredSave = localOwner.recovered ? localOwner.session?.getState() : undefined;
+      if (localDocumentSave && recoveredSave?.status === 'conflict') {
+        // Reopen only the refusal that owns the offered snapshot. A different
+        // tab may have replaced the recovery slot since it was displayed.
         setRecoveryActionRefused(true);
-        persistence.restoreRetainedConflict();
+        if (recoveredSave.ownerId && record.outboxOwnerId === recoveredSave.ownerId
+          && !isPermanentLocalSaveRejection(recoveredSave)
+          && JSON.stringify(record) === JSON.stringify(offeredRecoverySnapshotRef.current)) {
+          persistence.restoreRetainedConflict();
+        }
         return;
       }
       const draft = record.draft as { config?: TimelineConfig; registry?: AssetRegistry; bundle?: TimelineBundleEnvelope | null };
@@ -927,11 +931,21 @@ export function useTimelineSave(
     setRecoveredAsDirty(false);
   }, [isPermanentLocalSaveRejection, localSaveState, reloadFromServer]);
 
+  // The native owner holds the original intent and its guards even if the
+  // current view has moved to a later head. Opening that refusal needs no replay.
+  const retainedConflict = Boolean(recoveryOffer && localOwner.recovered
+    && localSaveState?.status === 'conflict' && localSaveState.ownerId
+    && offeredRecoverySnapshotRef.current?.outboxOwnerId === localSaveState.ownerId
+    && !isPermanentLocalSaveRejection(localSaveState));
+  const recoveryDraft = recoveryOffer && retainedConflict
+    ? { ...recoveryOffer, baseGone: false, retryAllowed: true }
+    : recoveryOffer;
+
   // The bar offers actions for the current save or the exact recovered draft shown to the person.
   const saveBar = saveBarInput({
     local: localSaveState,
     bootstrapFailed: localOwner.initialization === 'error',
-    recoveryDraft: persistence.isConflictExhausted ? null : recoveryDraft,
+    recoveryDraft: persistence.isConflictExhausted || !recoveryDraft ? null : { ...recoveryDraft, retainedConflict },
     conflictExhausted: persistence.isConflictExhausted,
     schemaIncompatible: persistence.schemaIncompatible != null,
     watchdogTripped: persistence.watchdogTripped,

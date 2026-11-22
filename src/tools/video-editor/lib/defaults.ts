@@ -47,6 +47,18 @@ export function createDefaultTimelineConfig(): TimelineConfig {
   };
 }
 
+/** Materialize legacy rational FPS for the editor without changing the authored document. */
+export function withNumericTimelineFps<T extends { output?: Partial<TimelineConfig['output']> }>(config: T): T {
+  const fps: unknown = config.output?.fps;
+  if (fps == null || typeof fps !== 'object') return config;
+  const { numerator, denominator } = fps as { numerator?: unknown; denominator?: unknown };
+  if (typeof numerator !== 'number' || !Number.isSafeInteger(numerator) || numerator <= 0
+    || typeof denominator !== 'number' || !Number.isSafeInteger(denominator) || denominator <= 0) {
+    throw new Error('Timeline property output.fps requires positive integer numerator and denominator');
+  }
+  return { ...config, output: { ...config.output, fps: numerator / denominator } };
+}
+
 /**
  * Fill missing or incomplete output fields on a timeline config while
  * preserving all existing values and non-output fields (clips, tracks,
@@ -54,7 +66,7 @@ export function createDefaultTimelineConfig(): TimelineConfig {
  *
  * Only absent or null-ish output fields are filled. Existing output values —
  * even empty strings or zero — are left untouched because they represent
- * explicit user choices.
+ * explicit user choices. Legacy rational FPS is projected as a number.
  *
  * Geometry precedence (mirrors Astrid's render contract — Remotion
  * `getCanvas` in Root.tsx and the ffmpeg `_timeline_canvas` both prefer
@@ -72,7 +84,7 @@ export function withDefaultTimelineOutput(
   input: Partial<TimelineConfig> & { output?: Partial<TimelineConfig['output']> },
   onMigration?: (findings: PlacementMigrationFinding[]) => void,
 ): TimelineConfig {
-  let config = input;
+  let config = withNumericTimelineFps(input);
   const existingOutput = config.output ?? ({} as Partial<TimelineConfig['output']>);
 
   const themeBound = config.theme !== undefined || config.theme_overrides !== undefined;
@@ -98,15 +110,18 @@ export function withDefaultTimelineOutput(
 
   // The package materializes an authored canvas, or the exact canvas this
   // editor historically resolved for a standalone media timeline.
-  if (config.output?.resolution === undefined) {
+  if (config.output?.resolution == null) {
     const tracks = new Map((config.tracks ?? []).map(track => [track.id, track]));
     const hasVisualMedia = (config.clips ?? []).some(clip => clip.asset
       && tracks.get(clip.track)?.kind !== 'audio'
       && (!clip.clipType || ['media', 'image', 'video', 'hold'].includes(clip.clipType)));
     if (hasVisualMedia || config.theme_overrides?.visual?.canvas !== undefined) {
-      const [width, height] = output.resolution.split('x').map(Number);
+      const [width, height] = output.resolution.toLowerCase().split('x').map(Number);
+      const { resolution: _resolution, fps: authoredFps, ...outputFields } = existingOutput;
+      const authoredOutput = config.output == null ? undefined
+        : { ...outputFields, ...(authoredFps == null ? {} : { fps: authoredFps }) };
       const result = normalizeClipPlacementWithFindings(
-        {...config, clips: config.clips ?? [], tracks: config.tracks ?? []} as unknown as Parameters<typeof normalizeClipPlacementWithFindings>[0],
+        {...config, output: authoredOutput, clips: config.clips ?? [], tracks: config.tracks ?? []} as unknown as Parameters<typeof normalizeClipPlacementWithFindings>[0],
         hasVisualMedia ? {legacyCanvas: {width, height, fps: output.fps, source: 'app-resolved'}} : undefined,
       );
       config = result.config as unknown as typeof config;

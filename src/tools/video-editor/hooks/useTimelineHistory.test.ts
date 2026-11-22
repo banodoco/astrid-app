@@ -310,6 +310,28 @@ describe('useTimelineHistory', () => {
     expect(restoreHistory).not.toHaveBeenCalled();
   });
 
+  it('passes the revision and publication captured when the user loaded history', async () => {
+    const entries = ['r0', 'old'].map(revisionId => ({
+      revisionId, projectId: 'project-1', parentDocumentId: 'timeline-1', contentDigest: 'sha256:' + 'a'.repeat(64),
+      createdAt: '2026-10-05T12:00:00Z', isCurrentHead: revisionId === 'r0',
+    }));
+    const listHistory = vi.fn(async () => entries);
+    const restoreHistory = vi.fn(async () => ({ newHead: 'restored' }));
+    const remoteHistory = { remoteHistoryAvailable: () => true, canUndo: () => false, canRedo: () => false,
+      undo: vi.fn(), redo: vi.fn() };
+    const initialData = { ...makeTimelineData(0), head: { projectId: 'project-1', timelineId: 'timeline-1',
+      headRevisionId: 'r0', headPublicationId: 'p0' } };
+    const { result } = setup({ initialData, remoteHistory,
+      providerOverrides: { shotComposition: { load: vi.fn(), listHistory, restoreHistory } as unknown as DataProvider['shotComposition'] } });
+    await act(async () => { await result.current.refreshCanonicalHistory(); });
+    expect(result.current.canonicalHistory).toEqual(entries);
+    await act(async () => { await result.current.restoreCanonicalRevision('old'); });
+    expect(restoreHistory).toHaveBeenCalledExactlyOnceWith({
+      projectId: 'project-1', parentDocumentId: 'timeline-1', revisionId: 'old',
+      reviewedHead: { revisionId: 'r0', publicationId: 'p0' },
+    });
+  });
+
   it('delegates mounted undo/redo to durable history once the owner is settled', async () => {
     const remoteHistory = {
       remoteHistoryAvailable: vi.fn(() => true),

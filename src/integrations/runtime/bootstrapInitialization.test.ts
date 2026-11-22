@@ -7,7 +7,9 @@ import { createCommitOutbox, type ClaimedOutbox } from '@/tools/video-editor/com
 import fixture from '@/tools/video-editor/commands/fixtures/recipe_m2_app_bootstrap_current.json';
 import { reserveBootstrapInitialization, resumeBootstrapInitialization } from './bootstrapInitialization.ts';
 import { acceptedCommit, fixtureDigest } from './__tests__/timelineCommitFixture.ts';
-import { ApiError } from './generated.ts';
+import { ApiError, type Transport } from './generated.ts';
+import { RuntimeDataProvider } from './dataProvider.ts';
+import { json, runtimeFixture } from '@/test/fakeWorkspaceRuntime.ts';
 
 const scope = { realmId: 'realm', actorId: 'actor', projectId: 'project-1', timelineId: 'main' };
 const h0 = { revisionId: 'parent-0', publicationId: 'bootstrap-p0' };
@@ -73,6 +75,162 @@ function environment() {
   return { open, ports: { createTimeline, loadLatest, commitTimeline, listTimelineCommits, getProjectParentCompositionRevision }, createResult,
     setBasis: (next: TimelineCommandBasis) => { basis = next; } };
 }
+
+function nativeBootstrapPeer(capable: boolean) {
+  const env = environment();
+  const runtime = runtimeFixture({ projectId: scope.projectId, timelineId: scope.timelineId, timelineExists: false });
+  const catalog = `/v1/projects/${scope.projectId}/timelines`;
+  const timeline = `${catalog}/${scope.timelineId}`;
+  const exchanges: Array<{ method: string; path: string; body?: unknown; key?: string }> = [];
+  let created = false;
+  let interrupted = false;
+  let historyFault: 'extra-page' | 'moved' | undefined;
+  const transport: Transport = async (method, path, headers, body) => {
+    const respond = (value: unknown, status = 200) => ({ status, headers: {}, body: json(value) });
+    if (path === '/v1/handshake') {
+      const response = await runtime.transport(method, path, headers, body);
+      const handshake = JSON.parse(new TextDecoder().decode(response.body));
+      if (capable) handshake.capabilities.push('timeline.verified_head.v1');
+      return respond(handshake);
+    }
+    if (!path.startsWith(catalog)) return runtime.transport(method, path, headers, body);
+    const request = body ? JSON.parse(new TextDecoder().decode(body as Uint8Array)) : undefined;
+    const requestKey = headers['Idempotency-Key'];
+    exchanges.push({ method, path, ...(request ? { body: request } : {}), ...(requestKey ? { key: requestKey } : {}) });
+    if (method === 'POST' && path === catalog) {
+      if (created) return respond({ code: 'conflict', message: 'Timeline already exists' }, 409);
+      const { receipt, ...data } = env.createResult();
+      created = true;
+      return respond({ data, receipt }, 201);
+    }
+    if (!created) return respond({ code: 'not_found', message: 'Timeline does not exist' }, 404);
+    if (interrupted && (path === `${timeline}/verified-head` || path.startsWith(`${timeline}/commits?`))) {
+      return respond({ code: 'invalid_request', message: 'Read interrupted after create ACK' }, 422);
+    }
+    if (method === 'GET' && path === `${timeline}/verified-head` && capable) {
+      const { head, canonicalDocument } = await env.ports.loadLatest();
+      return respond({ project_id: scope.projectId, timeline_id: scope.timelineId,
+        head: { revision_id: head.revisionId, publication_id: head.publicationId }, canonical_document: canonicalDocument });
+    }
+    if (method === 'GET' && path.startsWith(`${timeline}/commits?`)) {
+      const page = await env.ports.listTimelineCommits(scope.projectId, scope.timelineId);
+      if (historyFault === 'moved') page.head.publication_id = 'moved-publication';
+      if (historyFault === 'extra-page' && !path.includes('cursor=')) page.next_cursor = 'older';
+      return respond(page);
+    }
+    if (method === 'GET' && path.startsWith(`${timeline}/composition-revisions/`)) {
+      return respond(await env.ports.getProjectParentCompositionRevision(
+        scope.projectId, scope.timelineId, path.slice(path.lastIndexOf('/') + 1),
+      ));
+    }
+    if (method === 'POST' && path === `${timeline}/commit`) {
+      expect(request).toMatchObject({ base_revision_id: h0.revisionId, base_publication_id: h0.publicationId });
+      return respond((await env.ports.commitTimeline(request, requestKey)).response);
+    }
+    throw new Error(`Unexpected native bootstrap request ${method} ${path}`);
+  };
+  return {
+    provider: () => new RuntimeDataProvider({ projectId: scope.projectId, transport }),
+    catalog, timeline, exchanges,
+    interrupt: (value: boolean) => { interrupted = value; },
+    changeHistory: (value: typeof historyFault) => { historyFault = value; },
+  };
+}
+
+describe('native bootstrap through the Runtime provider', () => {
+  it.each(['verified-new', 'verified-recovery', 'legacy-new'] as const)(
+    'proves the sole bootstrap before one guarded init and displays the latest basis (%s)', async (mode) => {
+      const capable = mode !== 'legacy-new';
+      const peer = nativeBootstrapPeer(capable);
+      vi.stubGlobal('indexedDB', createFakeIndexedDB());
+      vi.stubGlobal('navigator', { locks: { request: async (_name: string, _options: unknown, work: (lock: object) => unknown) => work({}) } });
+      try {
+        const provider = peer.provider();
+        const ownerScope = { ...scope, ...await provider.getRecoverableIdentity() };
+        const options = { name: 'Main', createName: null, createKey: key };
+        const outboxes = createCommitOutbox();
+        let basis: TimelineCommandBasis;
+        let retainedOwner: string | undefined;
+        if (mode === 'verified-recovery') {
+          peer.interrupt(true);
+          await expect(provider.initializeNativeBootstrapTimeline(scope.timelineId, options)).rejects.toThrow('Read interrupted');
+          const records = await outboxes.list(ownerScope);
+          expect(records).toHaveLength(1);
+          const [record] = records;
+          expect(record).toMatchObject({ scope: ownerScope, intents: [], accepted: { head: h0,
+            creation: { request: { key, body: '{"timeline_id":"main"}' } },
+            value: { receipt: { command_kind: 'timeline.create', receipt_id: 'create-receipt', idempotency_key: key } },
+          } });
+          expect(record.pending).toBeUndefined();
+          expect(record.initialization).toBeUndefined();
+          expect(peer.exchanges.filter(({ method }) => method === 'POST')).toHaveLength(1);
+          retainedOwner = record.ownerId;
+          peer.interrupt(false);
+          basis = await peer.provider().recoverNativeBootstrapTimeline(scope.timelineId, retainedOwner);
+        } else {
+          basis = await provider.initializeNativeBootstrapTimeline(scope.timelineId, options);
+        }
+        const { catalog, timeline } = peer;
+        const posts = peer.exchanges.filter(({ method }) => method === 'POST');
+        expect(posts).toEqual([
+          { method: 'POST', path: catalog, body: { timeline_id: scope.timelineId }, key },
+          { method: 'POST', path: `${timeline}/commit`, key: expect.any(String), body: {
+            api_version: 1, project_id: scope.projectId, timeline_id: scope.timelineId,
+            base_revision_id: h0.revisionId, base_publication_id: h0.publicationId,
+            commands: fixture.commands, source: { via: 'app' },
+          } },
+        ]);
+        const afterCreate = peer.exchanges.slice(mode === 'verified-recovery' ? 2 : 1).map(({ path }) => path);
+        expect(afterCreate).toEqual([
+          `${timeline}/commits?limit=50`, `${timeline}/composition-revisions/${h0.revisionId}`, `${timeline}/commit`,
+          `${timeline}/commits?limit=50`, `${timeline}/composition-revisions/initialized`,
+          ...(capable ? [`${timeline}/verified-head`] : [`${timeline}/commits?limit=50`, `${timeline}/composition-revisions/initialized`]),
+        ]);
+        expect(basis.head).toEqual({ revisionId: 'initialized', publicationId: 'init-p1' });
+        expect(basis.canonicalDocument.parent_revision.payload).toMatchObject(fixture.after_bundle.parent);
+        if (capable) expect(basis.history).toBeUndefined();
+        else expect(basis.history?.items).toHaveLength(2);
+        const records = await outboxes.list(ownerScope);
+        expect(records).toHaveLength(1);
+        const [record] = records;
+        if (retainedOwner) expect(record.ownerId).toBe(retainedOwner);
+        expect(record).toMatchObject({ scope: ownerScope, intents: [], initialization: {
+          head: basis.head, request: { key: posts[1].key },
+        } });
+        expect(record.pending).toBeUndefined();
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    },
+  );
+
+  it.each(['extra-page', 'moved'] as const)('retains the create ACK and sends no init when bootstrap history is %s', async (fault) => {
+    const peer = nativeBootstrapPeer(true);
+    peer.changeHistory(fault);
+    vi.stubGlobal('indexedDB', createFakeIndexedDB());
+    vi.stubGlobal('navigator', { locks: { request: async (_name: string, _options: unknown, work: (lock: object) => unknown) => work({}) } });
+    try {
+      const provider = peer.provider();
+      const ownerScope = { ...scope, ...await provider.getRecoverableIdentity() };
+      await expect(provider.initializeNativeBootstrapTimeline(scope.timelineId, { name: 'Main', createName: null, createKey: key }))
+        .rejects.toThrow('original sole bootstrap publication');
+      expect(peer.exchanges.filter(({ method }) => method === 'POST')).toEqual([
+        { method: 'POST', path: peer.catalog, body: { timeline_id: scope.timelineId }, key },
+      ]);
+      expect(peer.exchanges.filter(({ path }) => path.includes('/commits?')).map(({ path }) => path)).toEqual([
+        `${peer.timeline}/commits?limit=50`,
+        ...(fault === 'extra-page' ? [`${peer.timeline}/commits?limit=50&cursor=older`] : []),
+      ]);
+      const records = await createCommitOutbox().list(ownerScope);
+      expect(records).toHaveLength(1);
+      expect(records[0]).toMatchObject({ intents: [], accepted: { head: h0, creation: { request: { key } } } });
+      expect(records[0].initialization).toBeUndefined();
+      expect(records[0].pending).toBeUndefined();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
 
 // Synthetic local adapter/storage inputs and mocked authority reads, not Runtime admission.
 async function localInitAcceptance(env: ReturnType<typeof environment>,

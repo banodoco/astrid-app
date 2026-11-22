@@ -200,6 +200,32 @@ describe('reading the project list', () => {
 });
 
 describe('importing one admitted bundle', () => {
+  it('fetches a validated catalog asset with the exact canonical ref digest, without changing catalog URLs', async () => {
+    const { importProjectElement, parseProjectElementList } = await loader();
+    const digest = digestOf(COMPONENT_SOURCE);
+    const first = entryFor(digest);
+    const secondBase = entryFor(digest, 'r2');
+    const second = { ...secondBase, ref: { ...secondBase.ref, id: 'blocks?ref=raw&x=1' },
+      descriptor: { ...secondBase.descriptor, id: 'blocks?ref=raw&x=1' } };
+    const catalog = parseProjectElementList(listBody([first, second]), 'project');
+    const bytes = new TextEncoder().encode(COMPONENT_SOURCE);
+    fetchMock.mockResolvedValue({ ok: true, redirected: false, arrayBuffer: async () => bytes.buffer.slice(0) });
+    const importModule = vi.fn(async () => ({ default: () => null }));
+    const canonicalRef = (entry: typeof first) => JSON.stringify([entry.ref.packId, entry.ref.kind, entry.ref.id, entry.ref.revision]);
+    const expectedFetch = async (entry: typeof first) => `http://127.0.0.1:17340${entry.url}?ref=${digestOf(canonicalRef(entry))}`;
+    origin = 'http://127.0.0.1:17340';
+
+    await importProjectElement(catalog.elements[0], new AbortController().signal, importModule);
+    await importProjectElement(catalog.elements[1], new AbortController().signal, importModule);
+
+    expect(catalog.elements.map(entry => entry.url)).toEqual([first.url, second.url]);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      await expectedFetch(first), await expectedFetch(second),
+    ]);
+    expect(fetchMock.mock.calls[0][0]).not.toBe(fetchMock.mock.calls[1][0]);
+    expect(String(fetchMock.mock.calls[1][0])).not.toContain('blocks?ref=raw&x=1');
+  });
+
   it('surfaces only the known pre-release binding refusal from the selected asset', async () => {
     const { importProjectElement } = await loader();
     const reason = 'This project element was admitted by a pre-release build. Change its component source, admit the element again, then place the new revision on the clip.';

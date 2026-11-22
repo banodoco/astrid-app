@@ -255,6 +255,7 @@ export function ClipTransitionSection({
                 onChange({
                   transition: {
                     ...clip.transition,
+                    type: authoredTransitionId(clip.transition.type),
                     duration: value,
                   },
                 });
@@ -287,7 +288,7 @@ export function ClipTransitionSection({
                 if (!clip.transition || !resolvedTransitionRecord?.schema) return;
                 onChange({
                   transition: {
-                    type: clip.transition.type,
+                    type: authoredTransitionId(clip.transition.type),
                     duration: clip.transition.duration,
                     params: materializeTransitionDefaults(resolvedTransitionRecord.schema),
                   },
@@ -309,7 +310,7 @@ export function ClipTransitionSection({
             if (!clip.transition) return;
             onChange({
               transition: {
-                type: clip.transition.type,
+                type: authoredTransitionId(clip.transition.type),
                 duration: clip.transition.duration,
                 params: {
                   ...(clip.transition.params ?? {}),

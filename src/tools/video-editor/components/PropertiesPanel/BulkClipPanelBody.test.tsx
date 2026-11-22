@@ -124,6 +124,12 @@ describe('BulkClipPanelBody transition selector', () => {
     });
   });
 
+  it('shows a canonical cross-fade using the built-in option after rerender', () => {
+    render(<BulkClipPanelBody {...bulkProps(vi.fn(), 'cross-fade')} />);
+    const section = screen.getByText('Transition').parentElement!;
+    expect(within(section).getByRole('combobox')).toHaveValue('crossfade');
+  });
+
   it('keeps the current transition label unchanged for non-sentinel choices', () => {
     render(<BulkClipPanelBody {...bulkProps(vi.fn(), 'crossfade')} />);
 

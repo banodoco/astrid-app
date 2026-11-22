@@ -2,7 +2,7 @@
   "files": {
     "config/astrid-cli-surface/cli-surface.json": {
       "from": "cli-surface.json",
-      "sha256": "sha256:397936a0d1bf708c00a4994bef98fd15610be268b59b7a9326d0afc543542149"
+      "sha256": "sha256:f0beb7982931559ae2c3bb7ccb6ce79ade1a5063c18c0ef21a2138d02a0852a9"
     },
     "config/astrid-public-boundary/README.md": {
       "from": "schemas/public-boundary/README.md",
@@ -31,6 +31,6 @@
   },
   "manifest": "artifacts.json",
   "producer": "astrid-agent",
-  "producer_version": "sha256:a0a476afda9908ee0e669337e240aaa3753351fa0eeb8b4661ef5cfdc24ca737",
-  "source_commit": "9814193a73f606719e81883a8be197d27dd361d4"
+  "producer_version": "sha256:013f43ab4d7ed34f58f03a2be445f8c1374a620cb24c97c4400977e552a94efc",
+  "source_commit": "f6e629b31e0f7fe74c0cb809061c10b74a79a765"
 }

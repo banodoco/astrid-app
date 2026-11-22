@@ -44,7 +44,7 @@ const EMPTY_SELECTION: AdmittedElementSelection = Object.freeze({projectId: null
 let current: AdmittedElementSelection = EMPTY_SELECTION;
 // What the last published selection was built from; a refresh that resolves to the same inputs keeps the same object.
 let currentSignature = '';
-// Verified bundles by digest. A digest names exact bytes, so a re-read of the same admitted build reuses its module.
+// A verified module can be reused only after Runtime authorized this exact scoped ref and digest.
 const importedByDigest = new Map<string, ProjectElementComponent>();
 let generation = 0;
 // The in-flight refresh's fetches. A scope change or a newer refresh aborts them, so a module requested for one
@@ -103,14 +103,16 @@ export async function refreshAdmittedElements(
     const wanted = list.elements.filter(entry => !requestedScope || requestedScope.refs.some(ref => refKey(ref) === refKey(entry.ref)));
     const outcomes = await Promise.all(wanted.map(async entry => {
       try {
+        if (entry.refusal) return { error: entry.refusal };
         const component = await Promise.race([(async () => {
-          const imported = importedByDigest.get(entry.digest);
+          const cacheKey = JSON.stringify([list.realmId, list.projectId, refKey(entry.ref), entry.digest]);
+          const imported = importedByDigest.get(cacheKey);
           if (imported) return imported;
           if (request !== generation) throw new DOMException('The editor moved to another project.', 'AbortError');
           const component = await loadEntry(entry);
           if (request !== generation || controller.signal.aborted) throw new DOMException('The editor moved to another project.', 'AbortError');
           if (typeof component !== 'function') throw new Error(`Project element ${entry.ref.id} is not a component.`);
-          importedByDigest.set(entry.digest, component);
+          importedByDigest.set(cacheKey, component);
           while (importedByDigest.size > 128) importedByDigest.delete(importedByDigest.keys().next().value!);
           return component;
         })(), deadline]);
@@ -122,11 +124,12 @@ export async function refreshAdmittedElements(
     if (request !== generation) return current;
     const failures: Record<string, string> = importFailures = Object.fromEntries(wanted.flatMap((entry, index) =>
       outcomes[index].error ? [[refKey(entry.ref), outcomes[index].error!]] : []));
-    if (wanted.length && Object.keys(failures).length === wanted.length) throw new Error(Object.values(failures)[0]);
+    if (wanted.length && Object.keys(failures).length === wanted.length && !wanted.some(entry => entry.refusal)) throw new Error(Object.values(failures)[0]);
     const loaded = wanted.filter((_, index) => outcomes[index].component);
     // A previously verified build of the same exact ref stays active if its replacement fails.
     const retained = current.projectId === list.projectId ? current.elements.filter(element =>
-      failures[refKey(element.descriptor as ElementRef)] && current.components[refKey(element.descriptor as ElementRef)]) : [];
+      failures[refKey(element.descriptor as ElementRef)] && !wanted.some(entry => entry.refusal && refKey(entry.ref) === refKey(element.descriptor as ElementRef))
+      && current.components[refKey(element.descriptor as ElementRef)]) : [];
     const signature = JSON.stringify([list.projectId, list.realmId, list.selectionDigest,
       loaded.map(entry => [refKey(entry.ref), entry.digest]), retained.map(element => refKey(element.descriptor as ElementRef))]);
     if (signature === currentSignature) {

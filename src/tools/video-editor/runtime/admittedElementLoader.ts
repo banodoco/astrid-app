@@ -12,6 +12,7 @@ export type ElementRef = { packId: string; kind: 'effect' | 'animation' | 'trans
 export type ProjectElementEntry = {
   ref: ElementRef; digest: string; url: string;
   descriptor: AdmittedDescriptor; authoring: AdmittedElement['authoring'];
+  refusal?: string;
 };
 /** An element admitted before the Runtime kept its compiled bundle: listed by name, never loadable until re-admitted. */
 export type LegacyElementRef = { packId: string; kind: ElementRef['kind']; id: string };
@@ -32,7 +33,7 @@ const allText = (value: Record<string, unknown>, keys: readonly string[]) => key
 /** The descriptor fields the editor's catalog and placeholders read, so a consumer never meets a missing one. */
 const validDescriptor = (descriptor: Record<string, unknown>, ref: Record<string, unknown>) => {
   const renderability = descriptor.renderability;
-  return descriptor.packId === ref.packId && descriptor.kind === ref.kind && descriptor.id === ref.id && descriptor.revision === ref.revision
+  return text(descriptor.packId) && !!descriptor.packId && descriptor.kind === ref.kind && descriptor.id === ref.id && descriptor.revision === ref.revision
     && allText(descriptor, ['label', 'description', 'componentPath']) && !!descriptor.label && !!descriptor.componentPath
     && Array.isArray(descriptor.parameters) && descriptor.parameters.every((parameter: unknown) => record(parameter) && text(parameter.name) && text(parameter.type))
     && record(descriptor.defaults) && record(renderability) && Object.keys(renderability).length === RENDERABILITY_KEYS.length
@@ -81,6 +82,9 @@ export function parseProjectElementList(value: unknown, projectId: string): Proj
     const key = elementKey(ref as unknown as ElementRef);
     if (keys.has(key)) throw new Error(`Runtime listed the element ${ref.id} twice.`);
     keys.add(key);
+    if (entry.descriptor.packId !== ref.packId) {
+      return { ...entry, refusal: `Project element ${ref.id} has a mismatched pack owner.` } as unknown as ProjectElementEntry;
+    }
     return entry as unknown as ProjectElementEntry;
   });
   return { version: 1, projectId, realmId: value.realmId, selectionDigest: value.selectionDigest,
@@ -111,11 +115,20 @@ export async function importProjectElement(
   signal: AbortSignal,
   importModule: (url: string) => Promise<{ default?: unknown }> = importRuntimeModule,
 ): Promise<ProjectElementComponent> {
+  if (entry.refusal) throw new Error(entry.refusal);
   try { assertHostSharedModules(HOST_SPECIFIERS); } catch (error) {
     if (error instanceof SharedModulesError) throw new Error(`${error.message} Rebuild the editor or reload it.`);
     throw error;
   }
-  const bytes = await fetchVerifiedBytes(`${runtimeOrigin()}${entry.url}`, entry.digest, signal, `Project element ${entry.ref.id}`);
+  const bytes = await fetchVerifiedBytes(`${runtimeOrigin()}${entry.url}`, entry.digest, signal, `Project element ${entry.ref.id}`, async response => {
+    if (response.status !== 409) return;
+    let body: unknown;
+    try { body = await response.json(); } catch { return; }
+    signal.throwIfAborted();
+    if (record(body) && record(body.details) && body.details.reason === 'project_element_binding_missing') {
+      return 'This project element was admitted by a pre-release build. Change its component source, admit the element again, then place the new revision on the clip.';
+    }
+  });
   signal.throwIfAborted();
   const moduleUrl = URL.createObjectURL(new Blob([bytes], { type: 'text/javascript' }));
   let namespace: { default?: unknown };

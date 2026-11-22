@@ -4,23 +4,57 @@
 
 The reusable Plan 77 recorders live in [`diagnostics/`](diagnostics/). They
 contain source only; captures and measurement outputs are not part of the App
-checkout. Build and serve the compiled App on the local origin expected by the
-recorders, using the installed browser and Playwright module paths:
+checkout. The authenticated local preview uses the exact clean product App
+checkout and an already adopted Runtime data root. Set `product` to the pinned
+product checkout, `stack` to its owned stack, `data` to that run's adopted data
+root, and `door_port` to the value from its owned stack info. Keep Runtime and
+its source profile under the short owned `HOME` and XDG paths shown here. Start
+Runtime through the installed standard CLI from this same owned stack:
 
 ```sh
-npm run build
-SAVE_LOOP_CHROME=/absolute/path/to/chrome \
-SAVE_LOOP_PLAYWRIGHT=/absolute/path/to/node_modules/playwright/index.mjs \
-npm run preview -- --host 127.0.0.1 --port 2400 --strictPort
+runtime_cli="$stack/program/versions/$(cat "$stack/program/current")/py/bin/astrid-runtime"
+runtime_python="${runtime_cli%/*}/python"
+source_manifest="$data/runtime/source-profiles/astrid.json"
+env HOME="$stack/home" XDG_DATA_HOME="$stack/home/.local/share" \
+  XDG_STATE_HOME="$stack/home/.local/state" \
+  "$runtime_cli" up --profile astrid --data-root "$data" --door-port "$door_port"
 ```
 
-Prepare and own the synthetic stack with the existing
-[`quick-backup-cycle.sh`](quick-backup-cycle.sh) workflow documented below.
-Its `backup` operation invokes Runtime's authenticated backup and verification;
-`restore-run` verifies the bundle, restores and adopts it into a fresh owned
-stack, then runs the normal quick sweep. Use its exact argument order, marker,
-fresh output paths and expected versions file. The diagnostic recorders only
-read that stack and do not replace backup, restore or adoption.
+From the exact product checkout, run the first command to build and the second
+to start its authenticated preview:
+
+```sh
+(
+  cd "$product"
+  env HOME="$stack/home" XDG_DATA_HOME="$stack/home/.local/share" \
+    XDG_STATE_HOME="$stack/home/.local/state" \
+    ASTRID_RUNTIME_PYTHON="$runtime_python" \
+    ASTRID_RUNTIME_SOURCE_MANIFEST="$source_manifest" \
+    PORT=2400 ASTRID_APP_LOOPBACK_ORIGIN=off \
+    node scripts/dev-local-workspace.mjs --data-root "$data" --build
+)
+(
+  cd "$product"
+  env HOME="$stack/home" XDG_DATA_HOME="$stack/home/.local/share" \
+    XDG_STATE_HOME="$stack/home/.local/state" \
+    ASTRID_RUNTIME_PYTHON="$runtime_python" \
+    ASTRID_RUNTIME_SOURCE_MANIFEST="$source_manifest" \
+    PORT=2400 VITE_ASTRID_DYNAMIC_PROXY_PORT=17500 \
+    ASTRID_APP_LOOPBACK_ORIGIN=off \
+    node scripts/dev-local-workspace.mjs --data-root "$data" \
+      --preview --preview-dir "$product/dist"
+)
+```
+
+Use the installed `astrid-runtime` CLI and the existing
+[`quick-backup-cycle.sh`](quick-backup-cycle.sh) backup and restore helpers to
+prepare the adopted runtime. `backup` uses Runtime's authenticated backup and
+verification. `restore-run` verifies, restores and adopts into its fresh owned
+data root, then owns the runtime/editor sweep and cleanup. Its lifecycle ends
+with cleanup, so a separate read-only capture needs its own adopted data root
+and running preview. Prepare those in the same owned sandbox and use that run's
+exact backup receipt, fixture manifest and version tuple together. Keep the
+collector's output paths new and inside that owned sandbox.
 
 For a compiled v30 opening, provide the owned stack root, its v30 manifest, a
 new result filename, and an explicit absolute py-spy executable. The collector
@@ -31,7 +65,8 @@ head proof. If the optional release-current terminal proof cannot complete in
 the browser, it invokes the packaged `terminal-public-read.mjs` after browser
 close; that helper uses the App's shipped public snapshot, runtime identity and
 fixture-ID utilities. Set `P77_PROFILE_RUNTIME=1` to record py-spy stacks;
-rank a resulting profile record with `python3 diagnostics/rank-runtime-profile.py RESULT.json`.
+rank a resulting profile record from the App checkout root with
+`python3 scripts/save-loop/diagnostics/rank-runtime-profile.py RESULT.json`.
 The raw trace must remain adjacent as `RESULT.json.py-spy.raw` and match its
 sample receipt. Invoke it with explicit owned output paths:
 
@@ -57,9 +92,9 @@ events, stack/temp/profile disk sizes, and process count. It does not inspect
 process arguments or environments. Keep its JSONL under the same dedicated
 owned sandbox; do not use it to gather browser or private logs.
 
-These commands provide static recorder packaging, not a new browser run or a
-product performance qualification. See the existing backup/restore and run
-qualification below before scheduling any measurement.
+The recorder sources are packaged, and no browser run or product performance
+qualification was performed. Read the existing backup/restore and run
+qualification below before scheduling a measurement.
 
 ## Plan 77 quick indicator
 

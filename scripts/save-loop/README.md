@@ -109,3 +109,32 @@ processes. No process arguments or environment are inspected. Opening, each
 complete recorder row (including its read-only checks), and guarded cleanup are
 separate CPU intervals; scenario CPU is not gesture-to-Saved CPU. Compare CPU
 and wall time together on the same stack and host.
+
+For the Plan 77 Round 4 opening sample, invoke `sweep.mjs` directly with the
+usual manifest, results, versions and environment plus `--reduced-opening`.
+This opt-in keeps the same isolated fixture and recorder assertions but runs
+only `video-move-same-track`, `audio-move-same-track` and `audio-mute`, three
+times each. The ordinary sweep remains the full matrix. The reduced sample
+does not complete the 85-scenario matrix; its 255 guarded restores can each
+trigger a full Runtime integrity replay.
+
+The reduced mode gives editor readiness, its read retries and both opening
+observations a shared 15-minute deadline starting immediately before cold
+navigation (browser startup is outside that budget). A provisional cold UI
+record is written as soon as exact IDs, tracks and Saved have been stable for
+800 ms, before public-head corroboration; it is not a full-open claim. At that
+marker the harness begins one-at-a-time, abortable timeline-metadata GETs and
+records every attempt and `post_open_blocked_s` for the first successful read
+under one second. This measures that route's availability only. Missing marker,
+failed and timed-out probes are explicit. It then records a same-profile warm
+reload and keeps cold and warm public-head corroboration separate. The normal
+15-second cold stability delay remains recorded. First-usable and Saved times
+are observation upper bounds, not proof of a successful edit.
+
+Reduced cleanup checks the row's observed head and publication before issuing
+Undo and requires an accepted commit receipt, a new head and publication,
+Saved, and public content/payload digests and clip/media IDs equal to the
+original. It stops on an incomplete or failed row or ambiguous Undo and does
+not fall back to restore. The regular matrix and its guarded restore are
+unchanged. The reduced run cannot be combined with the deliberate broken
+probe flags.

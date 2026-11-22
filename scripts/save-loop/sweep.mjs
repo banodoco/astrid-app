@@ -14,7 +14,7 @@
  */
 import fs from 'fs';
 
-const usage = 'Usage: node scripts/save-loop/sweep.mjs --manifest FILE --results FILE --versions FILE [--broken-probe|--broken-probe-only]';
+const usage = 'Usage: node scripts/save-loop/sweep.mjs --manifest FILE --results FILE --versions FILE [--broken-probe|--broken-probe-only] [--reduced-opening]';
 const args = process.argv.slice(2);
 if (args.includes('--help') || args.includes('-h')) { console.log(usage); process.exit(0); }
 function flag(name) {
@@ -24,6 +24,8 @@ function flag(name) {
   return value;
 }
 const probeOnly = args.includes('--broken-probe-only');
+const reducedOpening = args.includes('--reduced-opening');
+if (reducedOpening && (probeOnly || args.includes('--broken-probe'))) throw new Error('--reduced-opening cannot be combined with broken probes');
 const manifestPath = flag('--manifest');
 const resultsPath = flag('--results');
 const versionsPath = flag('--versions');
@@ -45,6 +47,9 @@ const helpers = await import('./lib.mjs');
 const {createRecorder, publicSnapshot} = await import('./assert.mjs');
 const {expectedFixtureIds, sameIds} = await import('./readiness.mjs');
 let browser;
+let provisionalSeen=false, probePromise;
+const record = value => fs.appendFileSync(resultsPath, JSON.stringify(value)+'\n');
+const round4 = reducedOpening ? await import('./round4.mjs') : null;
 for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]]) {
   process.once(signal, async () => {
     try { if (browser) await browser.close(); } finally { process.exit(code); }
@@ -53,19 +58,31 @@ for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]]) {
 let failed = false;
 const rows = [];
 try {
-  const {b, p: page, context, cpu, opening} = await helpers.open({fixture:probeOnly ? undefined : fixture, onCleanup: close => { browser = {close}; }});
+  const {b, p: page, context, cpu, opening, startup, measureWarmOpening} = await helpers.open({
+    fixture:probeOnly ? undefined : fixture, reducedOpening, onCleanup: close => { browser = {close}; },
+    onProvisional: reducedOpening ? ({warm, value, page, startup, marker}) => {
+      record({type:warm ? 'warm_opening_provisional' : 'cold_opening_provisional', full_ui_saved:value, corroborated:false, marker_at:new Date().toISOString(), readiness_budget_ms:900000, limitation:'UI sample only; public head not yet corroborated.'});
+      if (!warm) {
+        provisionalSeen=true;
+        probePromise=round4.postOpenProbe({page, fixture, startup, marker, record});
+        // A failure is consumed later, after the original cold corroboration.
+        probePromise.catch(()=>{});
+      }
+    } : undefined,
+  });
   browser = b;
   let secondPage;
-  const project = await page.evaluate(async projectId => {
+  const readStartup = (phase, operation) => startup ? startup.read(phase, operation) : operation();
+  const project = await readStartup('project', () => page.evaluate(async projectId => {
     const response = await fetch(`/api/runtime/v1/projects/${encodeURIComponent(projectId)}`, {credentials:'same-origin', cache:'no-store'});
     if (!response.ok) throw new Error(`sandbox project read failed (${response.status})`);
     const body = await response.json(); return body?.data ?? body;
-  }, fixture.project_id);
+  }, fixture.project_id));
   if (project.project_id !== fixture.project_id || project.metadata?.purpose !== 'synthetic Plan 77 save-loop fixture')
     throw new Error('project is not the synthetic Plan 77 sandbox fixture');
   fs.appendFileSync(resultsPath, JSON.stringify({type:'run', variant:fixture.variant || 'standard', date:new Date().toISOString(), versions, project_id:fixture.project_id, timeline_id:fixture.timeline_id, manifest:manifestPath}) + '\n');
   if (opening) {
-    const head = await publicSnapshot(page, baseUrl, fixture);
+    const head = await readStartup('head_after_ui', () => publicSnapshot(page, baseUrl, fixture));
     const idsMatch = sameIds(head.clipIds, expectedFixtureIds(fixture));
     opening.public_head = {project_id:head.project_id, timeline_id:head.timeline_id, revision:head.headRevision, publication:head.publicationId, exact_clip_ids:idsMatch};
     opening.full_ui_and_public_head_match = Boolean(opening.full_ui_saved && idsMatch && opening.head_before_ui.revision === head.headRevision && opening.head_before_ui.publication === head.publicationId);
@@ -77,22 +94,45 @@ try {
     fs.appendFileSync(resultsPath, JSON.stringify(opening)+'\n');
     if (!idsMatch) throw new Error('public head clip IDs do not match expected fixture');
   }
+  if (reducedOpening) {
+    if (!probePromise) throw new Error('stable cold UI marker was not observed');
+    await probePromise;
+    const warm = await measureWarmOpening(true);
+    const warmHead = await readStartup('warm_head_after_ui', () => publicSnapshot(page, baseUrl, fixture));
+    const idsMatch=sameIds(warmHead.clipIds, expectedFixtureIds(fixture));
+    warm.public_head={project_id:warmHead.project_id, timeline_id:warmHead.timeline_id, revision:warmHead.headRevision, publication:warmHead.publicationId, exact_clip_ids:idsMatch};
+    warm.full_open_corroborated=Boolean(warm.full_ui_saved && idsMatch && warm.head_before_ui.revision===warmHead.headRevision && warm.head_before_ui.publication===warmHead.publicationId);
+    warm.full_open_ms=warm.full_open_corroborated ? warm.full_ui_saved.ui_saved_ms : null;
+    warm.full_open_target_pass=warm.full_open_ms===null ? null : warm.full_open_ms<=warm.target_full_open_ms;
+    warm.full_open_confirmed=false;
+    warm.limitation='Same-profile reload; rendered head identity is not independently exposed.';
+    record(warm);
+    if (!idsMatch || !warm.full_open_corroborated || warmHead.headRevision!==opening.public_head.revision || warmHead.publicationId!==opening.public_head.publication) throw new Error('warm opening did not preserve the corroborated cold public head');
+  }
   const recorder = await createRecorder(page, {fixture, baseUrl, resultsPath, allowEmpty:probeOnly});
   let descriptors = [];
   if (!probeOnly) {
+    if (!reducedOpening) {
     secondPage = await context.newPage();
     await secondPage.setViewportSize({width:1700, height:1500});
     await secondPage.goto(helpers.URL_);
+    }
     const {editScenarios, repeatScenarios} = await import('./edits.mjs');
     const {dropScenarios} = await import('./drops.mjs');
     const {clashScenario} = await import('./clash.mjs');
     const contextArgs = {page, fixture, helpers};
-    descriptors = [
-      ...await editScenarios(contextArgs),
+    const edits = await editScenarios(contextArgs);
+    descriptors = reducedOpening ? edits.filter(d => ['video-move-same-track','audio-move-same-track','audio-mute'].includes(d.name)) : [
+      ...edits,
       ...await repeatScenarios(contextArgs),
       ...await dropScenarios(contextArgs),
       await clashScenario({...contextArgs, secondPage}),
     ];
+    if (reducedOpening) {
+      const names=descriptors.map(d=>d.name);
+      if (names.length!==3 || new Set(names).size!==3) throw new Error('reduced descriptor inventory is incomplete');
+      record({type:'reduced_matrix', names, repetitions:3, limitation:'Reduced opening sample; the full 85-scenario matrix remains unfinished.'});
+    }
   }
   if (args.includes('--broken-probe') || probeOnly) descriptors.push({
     name:'deliberately broken no-op probe', expected:'saved', timeoutMs:1000,
@@ -124,7 +164,7 @@ try {
       if (cpu) fs.appendFileSync(resultsPath, JSON.stringify({type:'cpu', name:descriptor.name, iteration, ...cpu.delta(scenarioStart,'scenario')})+'\n');
       const cleanupStart=cpu?.mark();
       try {
-        const cleanup = await descriptor.cleanup({page, secondPage, fixture, helpers, result:row});
+        const cleanup = reducedOpening ? await round4.undoCleanup({page, fixture, baseUrl, result:row}) : await descriptor.cleanup({page, secondPage, fixture, helpers, result:row});
         fs.appendFileSync(resultsPath, JSON.stringify({type:'cleanup', name:descriptor.name, iteration, result:cleanup ?? null, cpu:cpu?.delta(cleanupStart,'cleanup') ?? null}) + '\n');
         if (!firstAcceptedReported && descriptor.expected === 'saved' && row?.pass === true && cleanup?.changed === true) {
           fs.appendFileSync(resultsPath, JSON.stringify({type:'first_accepted_scenario', name:descriptor.name, iteration, gesture_to_saved_ms:row.ms, restored_content_verified:true, limitation:'Ordinary matrix row after opening; not part of cold-open timing or CPU.'})+'\n');
@@ -151,7 +191,9 @@ try {
   failed = true;
   console.error(`save-loop: ${error.message}`);
 } finally {
+  if (reducedOpening && !provisionalSeen) record({type:'post_open_blocked', post_open_blocked_s:null, attempts:0, outcome:'missing_ui_marker'});
   if (browser) await browser.close();
+  if (probePromise) await probePromise.catch(()=>{});
   console.table(rows.map(row => ({scenario:row.name, run:row.iteration, pass:row.pass, ms:row.ms, reason:row.reason || row.error})));
 }
 if (failed) process.exitCode = 1;

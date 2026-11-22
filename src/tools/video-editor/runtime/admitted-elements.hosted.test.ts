@@ -24,6 +24,7 @@ const fetchMock = vi.fn();
 const SOURCE = 'export default function Blocks() { return null; }';
 const DIGEST = createHash('sha256').update(SOURCE).digest('hex');
 const REF = { packId: 'project_pack', kind: 'effect' as const, id: 'blocks', revision: 'r1' };
+const REF_DIGEST = createHash('sha256').update(JSON.stringify([REF.packId, REF.kind, REF.id, REF.revision]), 'utf8').digest('hex');
 
 function installImportMap() {
   const bindings = Object.fromEntries(['react', 'react/jsx-runtime', 'remotion'].map((name, index) => [
@@ -56,7 +57,7 @@ function listBody(url = `/api/runtime/packs/project-elements/project/${DIGEST}.j
 function runtimeFetch(list: unknown) {
   return async (url: string) => {
     if (url.endsWith('/packs/project-elements?project=project')) return { ok: true, redirected: false, json: async () => list };
-    if (url.endsWith(`/packs/project-elements/project/${DIGEST}.js`)) {
+    if (url.endsWith(`/packs/project-elements/project/${DIGEST}.js?ref=${REF_DIGEST}`)) {
       return { ok: true, redirected: false, arrayBuffer: async () => new TextEncoder().encode(SOURCE).buffer };
     }
     throw new Error(`unexpected request ${url}`);
@@ -87,7 +88,7 @@ describe('element admissions on the hosted build', () => {
 
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
       'http://127.0.0.1:17340/api/runtime/packs/project-elements?project=project',
-      `http://127.0.0.1:17340/api/runtime/packs/project-elements/project/${DIGEST}.js`,
+      `http://127.0.0.1:17340/api/runtime/packs/project-elements/project/${DIGEST}.js?ref=${REF_DIGEST}`,
     ]);
     expect(host.admittedComponent(REF)).toBe(Blocks);
     expect(host.getAdmittedElementReadiness()).toMatchObject({ projectId: 'project', phase: 'ready', error: null });
@@ -113,7 +114,7 @@ describe('element admissions on the hosted build', () => {
 
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
       '/api/runtime/packs/project-elements?project=project',
-      `/api/runtime/packs/project-elements/project/${DIGEST}.js`,
+      `/api/runtime/packs/project-elements/project/${DIGEST}.js?ref=${REF_DIGEST}`,
     ]);
     expect(host.admittedComponent(REF)).toBe(Blocks);
   });

@@ -23,13 +23,13 @@ const listeners = new Set<() => void>();
 export const ADMITTED_ELEMENT_LOAD_TIMEOUT_MS = ASTRID_BRIDGE_REQUEST_TIMEOUT_MS;
 type AdmissionReadiness = {projectId: string | null; refKeys: readonly string[]; phase: 'idle' | 'loading' | 'ready' | 'error'; error: string | null;
   /** Elements the Runtime lists by name only (admitted before it kept their bundles); they need re-admitting. */
-  legacy: readonly LegacyElementRef[]};
+  legacy: readonly LegacyElementRef[]; failures: Readonly<Record<string, string>>};
 export const LEGACY_ELEMENT_REASON = 'Project elements admitted before this version need re-admitting: run project-pack admit again.';
 export const isLegacyElementRef = (ref: {packId?: string; kind: string; id: string}) => (
   readiness.legacy.some(entry => entry.packId === ref.packId && entry.kind === ref.kind && entry.id === ref.id)
 );
 const readinessListeners = new Set<() => void>();
-let readiness: AdmissionReadiness = {projectId: null, refKeys: [], phase: 'idle', error: null, legacy: []};
+let readiness: AdmissionReadiness = {projectId: null, refKeys: [], phase: 'idle', error: null, legacy: [], failures: {}};
 const publishReadiness = (next: AdmissionReadiness) => {
   readiness = next;
   readinessListeners.forEach(listener => listener());
@@ -44,7 +44,7 @@ const EMPTY_SELECTION: AdmittedElementSelection = Object.freeze({projectId: null
 let current: AdmittedElementSelection = EMPTY_SELECTION;
 // What the last published selection was built from; a refresh that resolves to the same inputs keeps the same object.
 let currentSignature = '';
-// Verified bundles by digest. A digest names exact bytes, so a re-read of the same admitted build reuses its module.
+// A verified module can be reused only after Runtime authorized this exact scoped ref and digest.
 const importedByDigest = new Map<string, ProjectElementComponent>();
 let generation = 0;
 // The in-flight refresh's fetches. A scope change or a newer refresh aborts them, so a module requested for one
@@ -56,7 +56,7 @@ export function setAdmittedElementScope(projectId:string,refs:NonNullable<typeof
   const next={projectId,refs:[...new Map(refs.map(ref=>[refKey(ref),ref])).values()].sort((a,b)=>refKey(a).localeCompare(refKey(b)))};
   if(JSON.stringify(scope)===JSON.stringify(next))return;
   const changed=scope?.projectId!==projectId;scope=next;++generation;inFlight?.abort();
-  publishReadiness({projectId, refKeys: next.refs.map(refKey), phase: 'loading', error: null, legacy: changed ? [] : readiness.legacy});
+  publishReadiness({projectId, refKeys: next.refs.map(refKey), phase: 'loading', error: null, legacy: changed ? [] : readiness.legacy, failures: {}});
   if(changed){current={...EMPTY_SELECTION,projectId};currentSignature='';listeners.forEach(listener=>listener());}
 }
 
@@ -80,7 +80,7 @@ export async function refreshAdmittedElements(
   const request = ++generation;
   inFlight?.abort();
   inFlight = controller;
-  const requestedReadiness = {...readiness, phase: 'loading' as const, error: null};
+  const requestedReadiness = {...readiness, phase: 'loading' as const, error: null, failures: {}};
   publishReadiness(requestedReadiness);
   let timeout: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<never>((_, reject) => {
@@ -89,6 +89,7 @@ export async function refreshAdmittedElements(
       controller.abort();
     }, ADMITTED_ELEMENT_LOAD_TIMEOUT_MS);
   });
+  let importFailures: Record<string, string> = {};
   try {
     const list = await Promise.race([readList(), deadline]);
     if (request !== generation) return current;
@@ -100,38 +101,57 @@ export async function refreshAdmittedElements(
     if (current.realmId !== null && list.realmId !== current.realmId) throw new Error('Element selection realm changed; reload the editor.');
     // Only the active exact requested pins are loaded. Missing pins stay unavailable; never substitute newest code.
     const wanted = list.elements.filter(entry => !requestedScope || requestedScope.refs.some(ref => refKey(ref) === refKey(entry.ref)));
-    const components = await Promise.race([Promise.all(wanted.map(async entry => {
-      const imported = importedByDigest.get(entry.digest);
-      if (imported) return imported;
-      if (request !== generation) throw new DOMException('The editor moved to another project.', 'AbortError');
-      const component = await loadEntry(entry);
-      if (request !== generation) throw new DOMException('The editor moved to another project.', 'AbortError');
-      if (typeof component !== 'function') throw new Error(`Project element ${entry.ref.id} is not a component.`);
-      importedByDigest.set(entry.digest, component);
-      while (importedByDigest.size > 128) importedByDigest.delete(importedByDigest.keys().next().value!);
-      return component;
-    })), deadline]);
+    const outcomes = await Promise.all(wanted.map(async entry => {
+      try {
+        if (entry.refusal) return { error: entry.refusal };
+        const component = await Promise.race([(async () => {
+          const cacheKey = JSON.stringify([list.realmId, list.projectId, refKey(entry.ref), entry.digest]);
+          const imported = importedByDigest.get(cacheKey);
+          if (imported) return imported;
+          if (request !== generation) throw new DOMException('The editor moved to another project.', 'AbortError');
+          const component = await loadEntry(entry);
+          if (request !== generation || controller.signal.aborted) throw new DOMException('The editor moved to another project.', 'AbortError');
+          if (typeof component !== 'function') throw new Error(`Project element ${entry.ref.id} is not a component.`);
+          importedByDigest.set(cacheKey, component);
+          while (importedByDigest.size > 128) importedByDigest.delete(importedByDigest.keys().next().value!);
+          return component;
+        })(), deadline]);
+        return { component };
+      } catch (error) {
+        return { error: error instanceof Error ? error.message : String(error) };
+      }
+    }));
     if (request !== generation) return current;
-    const signature = JSON.stringify([list.projectId, list.realmId, list.selectionDigest, wanted.map(entry => [refKey(entry.ref), entry.digest])]);
+    const failures: Record<string, string> = importFailures = Object.fromEntries(wanted.flatMap((entry, index) =>
+      outcomes[index].error ? [[refKey(entry.ref), outcomes[index].error!]] : []));
+    if (wanted.length && Object.keys(failures).length === wanted.length && !wanted.some(entry => entry.refusal)) throw new Error(Object.values(failures)[0]);
+    const loaded = wanted.filter((_, index) => outcomes[index].component);
+    // A previously verified build of the same exact ref stays active if its replacement fails.
+    const retained = current.projectId === list.projectId ? current.elements.filter(element =>
+      failures[refKey(element.descriptor as ElementRef)] && !wanted.some(entry => entry.refusal && refKey(entry.ref) === refKey(element.descriptor as ElementRef))
+      && current.components[refKey(element.descriptor as ElementRef)]) : [];
+    const signature = JSON.stringify([list.projectId, list.realmId, list.selectionDigest,
+      loaded.map(entry => [refKey(entry.ref), entry.digest]), retained.map(element => refKey(element.descriptor as ElementRef))]);
     if (signature === currentSignature) {
-      publishReadiness({...requestedReadiness, phase:'ready', legacy: list.legacy});
+      publishReadiness({...requestedReadiness, phase:'ready', legacy: list.legacy, failures});
       return current;
     }
     // import() returns an exotic module namespace: freezing it throws even when each export is valid.
     // The published selection is a plain frozen snapshot of the components already verified above.
     current = Object.freeze({projectId: list.projectId, selectionDigest: list.selectionDigest, realmId: list.realmId,
       projects: Object.freeze([...list.projects]),
-      elements: Object.freeze(wanted.map(entry => Object.freeze({projectId: list.projectId, descriptor: entry.descriptor, authoring: entry.authoring}))),
-      components: Object.freeze(Object.fromEntries(wanted.map((entry, index) => [refKey(entry.ref), components[index]])))});
+      elements: Object.freeze([...loaded.map(entry => Object.freeze({projectId: list.projectId, descriptor: entry.descriptor, authoring: entry.authoring})), ...retained]),
+      components: Object.freeze(Object.fromEntries([...wanted.flatMap((entry, index) => outcomes[index].component ? [[refKey(entry.ref), outcomes[index].component]] : []),
+        ...retained.map(element => [refKey(element.descriptor as ElementRef), current.components[refKey(element.descriptor as ElementRef)]])]))});
     currentSignature = signature;
     listeners.forEach(listener => listener());
-    publishReadiness({...requestedReadiness, phase:'ready', legacy: list.legacy});
+    publishReadiness({...requestedReadiness, phase:'ready', legacy: list.legacy, failures});
     return current;
   } catch (error) {
     // A failed list never rejects into prompts, mount or element adapters: the readiness store carries the reason,
     // elements stay unloaded, and clips that need them show the placeholder with that reason.
     const reason = error instanceof Error ? error.message : String(error);
-    if (request === generation) publishReadiness({...requestedReadiness, phase:'error', error:reason});
+    if (request === generation) publishReadiness({...requestedReadiness, phase:'error', error:reason, failures: importFailures});
     if (request === generation && reason !== lastLoggedFailure) {
       lastLoggedFailure = reason;
       console.error(`Project elements unavailable: ${reason}`);
@@ -141,6 +161,9 @@ export async function refreshAdmittedElements(
     clearTimeout(timeout);
     if (inFlight === controller) inFlight = null;
   }
+}
+export function admittedElementFailure(ref: {packId?: string; kind: string; id: string; revision: string}) {
+  return readiness.failures[refKey(ref as ElementRef)];
 }
 export function admittedComponent(ref: {packId?: string; kind: string; id: string; revision: string}) {
   return current.components[refKey(ref as ElementRef)];

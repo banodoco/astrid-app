@@ -13,6 +13,7 @@ import {
   type TransitionRegistryRecord,
 } from '@/tools/video-editor/transitions/registry/index.ts';
 import {
+  authoredTransitionId,
   listTransitions,
   resolveTransition,
   createTransitionSnapshot,
@@ -142,7 +143,7 @@ export function ClipTransitionSection({
             : undefined;
           onChange({
             transition: {
-              type: value,
+              type: authoredTransitionId(value),
               duration: clip.transition?.duration ?? 0.5,
               params: defaults && Object.keys(defaults).length > 0 ? defaults : undefined,
             },

@@ -114,6 +114,16 @@ describe('BulkClipPanelBody transition selector', () => {
     });
   });
 
+  it('authors the built-in crossfade with the canonical transition id', () => {
+    const onChangeDeep = vi.fn();
+    render(<BulkClipPanelBody {...bulkProps(onChangeDeep)} />);
+    const section = screen.getByText('Transition').parentElement!;
+    fireEvent.change(within(section).getByRole('combobox'), { target: { value: 'crossfade' } });
+    expect(onChangeDeep.mock.calls[0][0]({})).toEqual({
+      transition: { type: 'cross-fade', duration: 0.5, params: undefined },
+    });
+  });
+
   it('keeps the current transition label unchanged for non-sentinel choices', () => {
     render(<BulkClipPanelBody {...bulkProps(vi.fn(), 'crossfade')} />);
 

@@ -24,6 +24,7 @@ import {
   type TransitionRegistryRecord,
 } from '@/tools/video-editor/transitions/registry/index.ts';
 import {
+  authoredTransitionId,
   listTransitions,
   resolveTransition,
   createTransitionSnapshot,
@@ -550,7 +551,7 @@ export function BulkClipPanelBody(props: BulkClipPanelProps & {effectResources: 
                       : undefined;
                     onChangeDeep((meta) => ({
                       transition: {
-                        type: value,
+                        type: authoredTransitionId(value),
                         duration: meta.transition?.duration ?? sharedTransitionDuration ?? 0.5,
                         params: defaults && Object.keys(defaults).length > 0 ? defaults : undefined,
                       },

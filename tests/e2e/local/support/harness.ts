@@ -1328,7 +1328,8 @@ print(json.dumps({'revisionId': data['accepted_revision_id'], 'publicationId': r
       { id: sceneClipId, at: 0, track: 'V1', clipType: 'haus.astrid.liveScene', from: 0, to: 5, speed: 1, app: { liveScene } },
       { id: speechClipId, at: 5, track: 'V1', clipType: 'media', asset: assetKey, from: 0, to: 6, speed: 1 },
     ];
-    const registry = { assets: { [assetKey]: { file: 'journey-speech.webm', type: 'video', duration: 12, media_id: video.objectId, content_sha256: video.digest } } };
+    // REVIEW: Lead ruling 21/22 Nov: Agent 86031e920 strict registry validation requires bare lowercase SHA-256; preserve the tagged media ID.
+    const registry = { assets: { [assetKey]: { file: 'journey-speech.webm', type: 'video', duration: 12, media_id: video.objectId, content_sha256: video.digest.replace(/^sha256:/, '') } } };
     const timelineId = randomUUID();
     // Runtime retired `composition-revisions` publication (410 retired_route); seed through `POST .../timelines/{t}/commit`.
     // The commit route admits only media the same commit names (`media.admit`): the speech asset is the seeded video object.

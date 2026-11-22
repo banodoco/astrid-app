@@ -2237,11 +2237,12 @@
   content: "";
   position: absolute;
   z-index: -1;
-  inset: -16px -20px;
-  border-radius: 24px;
-  background: color-mix(in srgb, var(--astrid-paper) 84%, transparent);
+  inset: -36px -48px;
+  background: radial-gradient(ellipse at 42% 50%, color-mix(in srgb, var(--astrid-paper) 92%, transparent) 0%, color-mix(in srgb, var(--astrid-paper) 82%, transparent) 52%, transparent 100%);
   -webkit-backdrop-filter: blur(18px);
   backdrop-filter: blur(18px);
+  -webkit-mask-image: radial-gradient(ellipse at 42% 50%, #000 28%, rgb(0 0 0 / .82) 58%, transparent 100%);
+  mask-image: radial-gradient(ellipse at 42% 50%, #000 28%, rgb(0 0 0 / .82) 58%, transparent 100%);
   pointer-events: none;
 }
 .astrid-vision-hero-copy > .astrid-vision-hero-text { animation: none; }

@@ -31,10 +31,19 @@ clock starts immediately before navigation. The harness derives the IDs that
 start in the first 15 seconds from the standard builder's image/video/audio
 placement rules and checks that each control intersects the visible viewport
 and clipping ancestors. A real Enter selection also records the manifest
-selection target's response. These are visibility and selection observations,
-not proof that the complete first 15 seconds are editable. The first-usable
-metric and its 5-second target result are unavailable: no additional write is
-made while the opening head and guarded restore are unverified.
+selection target's response. First usable is a no-write affordance milestone:
+in one observation the first-15 clip IDs intersect the viewport, the target
+clip is selected by the real selection probe, and that fixture track's normal
+`Track name` input is enabled and non-read-only. The input shares the editor's
+timeline editability policy, including the save-readiness hold. The harness
+records elapsed time and the 5-second target comparison; the timestamp is an
+observation upper bound. The track-name field normally appears on hover, so
+its enabled state is checked without typing, changing focus or making an extra
+write. This evidence does not prove the whole 15-second range is visible, that
+every clip can be edited, or that any write has been accepted. When an ordinary
+matrix row first passes its existing save assertions and guarded content restore,
+a separate `first_accepted_scenario` record corroborates an accepted edit; its
+CPU and elapsed time remain in that row, outside the cold-open measurement.
 
 The corroborated full-open milestone requires the exact standard clip IDs,
 exact nine track IDs, project/timeline URL and Saved to agree in UI samples for

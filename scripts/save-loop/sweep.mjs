@@ -98,6 +98,7 @@ try {
     name:'deliberately broken no-op probe', expected:'saved', timeoutMs:1000,
     gesture:async()=>{}, cleanup:context=>context.helpers.restoreScenario(context),
   });
+  let firstAcceptedReported = false;
   for (const descriptor of descriptors) {
     if (!descriptor || typeof descriptor.name !== 'string' || typeof descriptor.gesture !== 'function' ||
         !['saved','clash'].includes(descriptor.expected) || typeof descriptor.cleanup !== 'function') {
@@ -125,6 +126,10 @@ try {
       try {
         const cleanup = await descriptor.cleanup({page, secondPage, fixture, helpers, result:row});
         fs.appendFileSync(resultsPath, JSON.stringify({type:'cleanup', name:descriptor.name, iteration, result:cleanup ?? null, cpu:cpu?.delta(cleanupStart,'cleanup') ?? null}) + '\n');
+        if (!firstAcceptedReported && descriptor.expected === 'saved' && row?.pass === true && cleanup?.changed === true) {
+          fs.appendFileSync(resultsPath, JSON.stringify({type:'first_accepted_scenario', name:descriptor.name, iteration, gesture_to_saved_ms:row.ms, restored_content_verified:true, limitation:'Ordinary matrix row after opening; not part of cold-open timing or CPU.'})+'\n');
+          firstAcceptedReported = true;
+        }
       } catch (error) {
         const failure = {type:'cleanup_failure', name:descriptor.name, iteration, error:String(error?.message || error), cpu:cpu?.delta(cleanupStart,'cleanup') ?? null};
         fs.appendFileSync(resultsPath, JSON.stringify(failure) + '\n');

@@ -13,7 +13,7 @@ import {spawn, execFileSync} from 'child_process';
 import {once} from 'events';
 import {performance} from 'node:perf_hooks';
 import {createCpuSampler, runtimeRoot, processRoot} from './cpu.mjs';
-import {expectedFixtureIds, first15FixtureIds, sameIds} from './readiness.mjs';
+import {expectedFixtureIds, first15FixtureIds, first15WritableCondition, sameIds} from './readiness.mjs';
 const {chromium}=await import(process.env.SAVE_LOOP_PLAYWRIGHT||'playwright');
 function need(name){ const v=process.env[name]; if(!v){ throw new Error(`missing env ${name} (see scripts/save-loop/lib.mjs header or run sweep.mjs --help)`); } return v; }
 const CHROME=need('SAVE_LOOP_CHROME');
@@ -135,6 +135,20 @@ export async function open({onCleanup, fixture, onOpening} = {}){
           return {visible_ms:visible, selection_ms:performance.now()-start, selected_before:selectedBefore, selection_transition_proven:selectedBefore !== 'true', runtime_posts_during_selection:posts.length-countBefore, limitation:'Selection only; first 15 seconds rendered, editable state, and unchanged public head are not established.'};
         } catch(error) {return {selection_ms:null, error:String(error.message), limitation:'Selection and first 15 seconds editable are not established.'};}
       })();
+      const firstUsable=(async()=>{
+        const selected=await selection;
+        if (!selected.selection_transition_proven || selected.runtime_posts_during_selection !== 0) return {ms:null, target_pass:null, reason:'The clip selection transition without a Runtime POST was not established.'};
+        try {
+          const handle=await p.waitForFunction(first15WritableCondition, {
+            expectedIds:first15FixtureIds(fixture), project:fixture.project_id, timeline:fixture.timeline_id,
+            targetClipId:target.clip_id, targetTrackId:target.track_id,
+          }, {timeout:300000});
+          const evidence=await handle.jsonValue();
+          const ms=performance.now()-start;
+          await handle.dispose();
+          return {ms,target_pass:ms<=5000,evidence, label:'First-15 clip visibility, responded-to selection, and writable track-name affordance; no edit was made.', limitation:'A writable affordance and the shared editability policy do not prove that a persisted edit was accepted or that every clip is editable.'};
+        } catch(error) {return {ms:null,target_pass:null,reason:String(error.message)};}
+      })();
       await navigation;
       const {publicSnapshot} = await import('./assert.mjs');
       const headBefore = await publicSnapshot(p, process.env.SAVE_LOOP_BASE_URL, fixture);
@@ -152,9 +166,9 @@ export async function open({onCleanup, fixture, onOpening} = {}){
         await p.waitForTimeout(250);
       }
       if (!full) opening = {cpu:cpu.delta(cpuStart,'opening_until_full_ui_timeout')};
-      const [selected,first15Visible]=await Promise.all([selection,first15]);
+      const [selected,first15Visible,usable]=await Promise.all([selection,first15,firstUsable]);
       p.off('request',observe);
-      opening={type:'opening', selection:selected, first_15_seconds_visibility:first15Visible, first_usable_ms:null, first_usable_target_pass:null, first_usable_unavailable_reason:'No accepted edit probe was performed; visibility and selection alone do not establish editability.', full_ui_saved:full, head_before_ui:{revision:headBefore.headRevision,publication:headBefore.publicationId}, timeout_cpu:opening?.cpu ?? null, limitation:full ? 'Public head identity and exact IDs must be confirmed before this is a full-open claim.' : 'Full UI was not proven; the timeline may virtualize offscreen controls.', target_first_usable_ms:5000,target_full_open_ms:15000};
+      opening={type:'opening', selection:selected, first_15_seconds_visibility:first15Visible, first_usable:usable, first_usable_ms:usable.ms, first_usable_target_pass:usable.target_pass, full_ui_saved:full, head_before_ui:{revision:headBefore.headRevision,publication:headBefore.publicationId}, timeout_cpu:opening?.cpu ?? null, limitation:full ? 'Public head identity and exact IDs must be confirmed before this is a full-open claim.' : 'Full UI was not proven; the timeline may virtualize offscreen controls.', target_first_usable_ms:5000,target_full_open_ms:15000};
     } else {
       await p.goto(URL_);
       await p.waitForFunction(()=>[...document.querySelectorAll('div')].some(e=>e.children.length===0&&/^saved$/i.test(e.textContent||'')),null,{timeout:60000});

@@ -39,7 +39,7 @@
     margin-top: 32px;
     padding: 12px;
     border-radius: 20px;
-    background: color-mix(in srgb, var(--astrid-paper) 82%, transparent);
+    background: color-mix(in srgb, var(--astrid-paper) 86%, transparent);
     -webkit-backdrop-filter: blur(14px);
     backdrop-filter: blur(14px);
   }

@@ -2237,8 +2237,8 @@
   content: "";
   position: absolute;
   z-index: -1;
-  inset: -110px -210px;
-  background: radial-gradient(ellipse 47% 47% at 50% 50%, color-mix(in srgb, var(--astrid-paper) 96%, transparent) 0%, color-mix(in srgb, var(--astrid-paper) 90%, transparent) 72%, transparent 100%);
+  inset: -260px -420px;
+  background: radial-gradient(ellipse 50% 50% at 50% 50%, color-mix(in srgb, var(--astrid-paper) 96%, transparent) 0%, color-mix(in srgb, var(--astrid-paper) 96%, transparent) 76%, color-mix(in srgb, var(--astrid-paper) 90%, transparent) 90%, transparent 100%);
   pointer-events: none;
 }
 .astrid-vision-hero-copy > .astrid-vision-hero-text { animation: none; }
@@ -2302,7 +2302,7 @@
   padding: clamp(14px, 2.2vw, 28px);
   border: 1px solid color-mix(in srgb, var(--astrid-ink) 12%, transparent);
   border-radius: clamp(20px, 3vw, 32px);
-  background: color-mix(in srgb, var(--astrid-paper) 76%, transparent);
+  background: color-mix(in srgb, var(--astrid-paper) 86%, transparent);
   -webkit-backdrop-filter: blur(18px);
   backdrop-filter: blur(18px);
   pointer-events: none;

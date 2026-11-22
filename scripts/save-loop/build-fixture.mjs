@@ -27,8 +27,11 @@ const baseUrl = process.env.SAVE_LOOP_BASE_URL;
 const variant = process.env.SAVE_LOOP_VARIANT || 'standard';
 const largeShots = variant === 'large-shots';
 const quickFixture = process.env.SAVE_LOOP_QUICK_FIXTURE === '1';
+const quickSandbox = path.resolve(`${repo}.env/quick-indicator`);
+const productApp = quickFixture ? path.resolve(process.env.SAVE_LOOP_PRODUCT_APP || '') : repo;
+const expectedVersionsPath = quickFixture ? path.resolve(process.env.SAVE_LOOP_VERSIONS || '') : null;
 const startedAt = Date.now();
-const scratch = path.resolve(process.env.SAVE_LOOP_SCRATCH || `${repo}.env/save-loop`);
+const scratch = path.resolve(process.env.SAVE_LOOP_SCRATCH || (quickFixture ? path.join(quickSandbox,'fixture-build') : `${repo}.env/save-loop`));
 const clipTarget = Number(process.env.SAVE_LOOP_CLIPS || 616);
 const byteTarget = Number(process.env.SAVE_LOOP_DOCUMENT_BYTES || 2_600_000);
 const ratioTarget = Number(process.env.SAVE_LOOP_COMMIT_RATIO || 15);
@@ -660,6 +663,8 @@ async function main() {
     throw new Error('save-loop fixture creation requires the owned local isolated stack');
   if (origin.pathname !== '/' || origin.search || origin.hash) throw new Error('SAVE_LOOP_BASE_URL must be a local origin without a path or query');
   if (quickFixture) {
+    if (!(scratch === quickSandbox || scratch.startsWith(`${quickSandbox}${path.sep}`)))
+      throw new Error('quick fixture scratch must be inside the tooling quick sandbox');
     if (!Number.isInteger(clipTarget) || ![0, 10, 100].includes(clipTarget) || largeShots)
       throw new Error('quick fixtures require standard variant and SAVE_LOOP_CLIPS of 0, 10, or 100');
   } else if (!Number.isInteger(clipTarget) || clipTarget < 616) {
@@ -671,13 +676,34 @@ async function main() {
       || fs.readFileSync(marker, 'utf8') !== `astrid-app-sl1-stack-v1 ${resolvedRoot}`)
     throw new Error('SAVE_LOOP_ROOT must be the exact owned isolated stack');
   const pid = fs.readFileSync(path.join(resolvedRoot, 'editor.pid'), 'utf8').trim();
+  if (quickFixture) {
+    if (!process.env.SAVE_LOOP_PRODUCT_APP || !process.env.SAVE_LOOP_VERSIONS)
+      throw new Error('quick fixture requires explicit SAVE_LOOP_PRODUCT_APP and SAVE_LOOP_VERSIONS inputs');
+    const resolvedProductApp = fs.realpathSync(productApp);
+    if (resolvedProductApp !== productApp || !fs.existsSync(path.join(resolvedProductApp,'.git')))
+      throw new Error('quick fixture product App must be a canonical supplied Git checkout');
+    if (!fs.existsSync(expectedVersionsPath))
+      throw new Error('quick fixture requires an explicit SAVE_LOOP_VERSIONS JSON path');
+    const resolvedVersions = fs.realpathSync(expectedVersionsPath);
+    if (resolvedVersions !== expectedVersionsPath || !(resolvedVersions === quickSandbox || resolvedVersions.startsWith(`${quickSandbox}${path.sep}`)))
+      throw new Error('quick fixture versions JSON must be canonical and inside the tooling quick sandbox');
+    const wanted = JSON.parse(fs.readFileSync(resolvedVersions, 'utf8'));
+    const stackFields = Object.fromEntries(fs.readFileSync(path.join(resolvedRoot, 'stack-info.txt'), 'utf8').split(/\r?\n/)
+      .filter(line => /^(APP|AGENT|RUNTIME)_SHA=/.test(line)).map(line => line.split('=')));
+    const appHead = spawnSync('git', ['-C', resolvedProductApp, 'rev-parse', 'HEAD'], {encoding:'utf8'}).stdout?.trim();
+    const productStatus = spawnSync('git', ['-C', resolvedProductApp, 'status', '--porcelain', '--untracked-files=normal'], {encoding:'utf8'});
+    if (![wanted.app, wanted.agent, wanted.runtime].every(value => /^[0-9a-f]{40}$/.test(value || ''))
+        || wanted.app !== appHead || wanted.app !== stackFields.APP_SHA || wanted.agent !== stackFields.AGENT_SHA || wanted.runtime !== stackFields.RUNTIME_SHA)
+      throw new Error('quick fixture expected versions must exactly match the clean product App HEAD and owned stack tuple');
+    if (productStatus.status !== 0 || productStatus.stdout.trim()) throw new Error('quick fixture product App checkout must be clean');
+  }
   if (!/^\d+$/.test(pid)) throw new Error('owned stack editor PID is invalid');
   const ps = spawnSync('ps', ['-p', pid, '-o', 'args='], {encoding: 'utf8'});
   const cwd = process.platform === 'darwin'
     ? spawnSync('lsof', ['-a', '-p', pid, '-d', 'cwd', '-Fn'], {encoding: 'utf8'}).stdout?.split('\n').find(line => line.startsWith('n'))?.slice(1)
     : fs.realpathSync(`/proc/${pid}/cwd`);
   if (ps.status !== 0 || !ps.stdout.includes('dev-local-workspace.mjs')
-      || !ps.stdout.includes(path.join(resolvedRoot, 'data')) || cwd !== repo)
+      || !ps.stdout.includes(path.join(resolvedRoot, 'data')) || cwd !== productApp)
     throw new Error('editor process does not match the owned stack and App checkout');
   const ports = stackPorts(root);
   if (Number(origin.port) !== ports.editor) throw new Error(`SAVE_LOOP_BASE_URL port must match this stack's editor port ${ports.editor}`);

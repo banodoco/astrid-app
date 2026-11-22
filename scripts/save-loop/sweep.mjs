@@ -26,12 +26,18 @@ function flag(name) {
 const probeOnly = args.includes('--broken-probe-only');
 const reducedOpening = args.includes('--reduced-opening');
 const quick = args.includes('--quick');
+const quickWarmReload = args.includes('--quick-warm-reload');
+if (quickWarmReload && !quick) throw new Error('--quick-warm-reload requires --quick');
+const runtimeStartupPath = args.includes('--runtime-startup') ? flag('--runtime-startup') : null;
+if (runtimeStartupPath && !quick) throw new Error('--runtime-startup is only valid with --quick');
 if (quick && (probeOnly || args.includes('--broken-probe') || args.includes('--broken-probe-only'))) throw new Error('--quick cannot be combined with broken probes');
 if (reducedOpening && (probeOnly || args.includes('--broken-probe'))) throw new Error('--reduced-opening cannot be combined with broken probes');
 const manifestPath = flag('--manifest');
 const resultsPath = flag('--results');
 const versionsPath = flag('--versions');
 const fixture = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+const heavyQuickFixture = fixture.variant === 'v30' || fixture.measurement?.label === 'heavy seed history, worst case';
+if (quickWarmReload && !heavyQuickFixture) throw new Error('--quick-warm-reload is reserved for the heavy v30 fixture');
 const versions = JSON.parse(fs.readFileSync(versionsPath, 'utf8'));
 if (!fixture.project_id || !fixture.timeline_id || (!probeOnly && (!fixture.tracks || !fixture.clips || !fixture.media)))
   throw new Error('fixture manifest lacks project, timeline, tracks, clips or media');
@@ -49,6 +55,9 @@ const helpers = await import('./lib.mjs');
 const {createRecorder, publicSnapshot} = await import('./assert.mjs');
 const {expectedFixtureIds, sameIds} = await import('./readiness.mjs');
 const quickTools = quick ? await import('./quick.mjs') : null;
+const runtimeStartup = runtimeStartupPath ? JSON.parse(fs.readFileSync(runtimeStartupPath, 'utf8')) : null;
+if (runtimeStartup && (runtimeStartup.type !== 'runtime_startup' || runtimeStartup.measurement !== 'runtime_start_launch_to_first_authenticated_complete_subsecond_metadata'))
+  throw new Error('--runtime-startup does not contain a valid Runtime startup clock record');
 let browser;
 let provisionalSeen=false, probePromise, postOpenObservation;
 const record = value => {
@@ -182,6 +191,28 @@ try {
         quickQuietClean=second.clean;
       } else if (!postOpenObservation) record({type:'quick_quiet_skipped',reason:'post-open read result was not observed'});
     } else record({type:'quick_quiet_skipped',reason:first.cleanupError || 'immediate arm cleanup was not verified'});
+    if (quickWarmReload) {
+      if (!quickImmediateClean || (quickQuiet && !quickQuietClean)) {
+        record({type:'quick_warm_opening',outcome:'unobserved',reason:'quick arm cleanup was not authoritatively verified'});
+      } else {
+        try {
+          const cleanBeforeWarm=await publicSnapshot(page,baseUrl,fixture);
+          if (!sameIds(cleanBeforeWarm.clipIds,expectedFixtureIds(fixture)) || cleanBeforeWarm.content_digest!==quickBaseline.content_digest || cleanBeforeWarm.payload_digest!==quickBaseline.payload_digest)
+            throw new Error('authoritative post-Undo snapshot does not match the pre-open fixture content');
+          const warm=await measureWarmOpening(true);
+          const afterWarm=await publicSnapshot(page,baseUrl,fixture);
+          const preserved=afterWarm.headRevision===cleanBeforeWarm.headRevision && afterWarm.publicationId===cleanBeforeWarm.publicationId &&
+            afterWarm.content_digest===cleanBeforeWarm.content_digest && afterWarm.payload_digest===cleanBeforeWarm.payload_digest && sameIds(afterWarm.clipIds,expectedFixtureIds(fixture));
+          const warmOutcome=preserved&&warm.first_usable_ms!=null?'available':'unobserved';
+          record({...warm,type:'quick_warm_opening',outcome:warmOutcome,
+            authoritative_cleanup_before_reload:true,clean_head:{revision:cleanBeforeWarm.headRevision,publication:cleanBeforeWarm.publicationId},
+            public_head_preserved_after_reload:preserved,
+            reason:preserved?null:'warm reload changed or failed to preserve the authoritative clean public head',
+            limitation:'Optional same-profile heavy-fixture reload after guarded Undo; it starts only after the immediate and quiet arms.'});
+          if (!preserved) failed=true;
+        } catch(error) { record({type:'quick_warm_opening',outcome:'unobserved',reason:String(error?.message||error)}); failed=true; }
+      }
+    }
     descriptors=[];
   }
   if (args.includes('--broken-probe') || probeOnly) descriptors.push({

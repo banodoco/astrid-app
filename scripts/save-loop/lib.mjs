@@ -12,7 +12,7 @@ import {fileURLToPath} from 'url';
 import {spawn, execFileSync} from 'child_process';
 import {once} from 'events';
 import {performance} from 'node:perf_hooks';
-import {createCpuSampler, runtimeRoot, processRoot} from './cpu.mjs';
+import {createCpuSampler, runtimeRoot, runtimeRootForData, processRoot} from './cpu.mjs';
 import {expectedFixtureIds, first15FixtureIds, first15WritableCondition, sameIds} from './readiness.mjs';
 const {chromium}=await import(process.env.SAVE_LOOP_PLAYWRIGHT||'playwright');
 function need(name){ const v=process.env[name]; if(!v){ throw new Error(`missing env ${name} (see scripts/save-loop/lib.mjs header or run sweep.mjs --help)`); } return v; }
@@ -124,11 +124,16 @@ export async function open({onCleanup, fixture, onOpening, reducedOpening = fals
       if (!quickOpening && (!target?.clip_id || !target?.track_id)) throw new Error('fixture lacks a selection target');
       if (quickOpening && clipCount > 0 && (!target?.clip_id || !target?.track_id)) throw new Error('quick fixture lacks an exact clip selection target');
       if (!process.env.SAVE_LOOP_ROOT) throw new Error('SAVE_LOOP_ROOT required for owned Runtime CPU identity');
-      cpu = createCpuSampler(runtimeRoot(process.env.SAVE_LOOP_ROOT), processRoot(proc.pid));
+      const runtimeDataRoot=process.env.SAVE_LOOP_RUNTIME_DATA_ROOT;
+      const runtime=runtimeDataRoot
+        ? await runtimeRootForData(process.env.SAVE_LOOP_ROOT,runtimeDataRoot,`${process.env.SAVE_LOOP_BASE_URL}/api/runtime/v1/health`)
+        : runtimeRoot(process.env.SAVE_LOOP_ROOT);
+      cpu = createCpuSampler(runtime, processRoot(proc.pid));
       startup=startupBudget(undefined, reducedOpening ? 900000 : 480000);
       quickBaseline = null; quickMarker = null;
       const measureQuickOpening = async () => {
         const {publicSnapshot} = await import('./assert.mjs');
+        const preNavigationStartedAt=new Date().toISOString(), preNavigationStart=performance.now();
         const projectEndpoint=new URL(`/api/runtime/v1/projects/${encodeURIComponent(fixture.project_id)}`,process.env.SAVE_LOOP_BASE_URL).href;
         await p.goto(projectEndpoint, {waitUntil:'domcontentloaded', timeout:startup.remaining()});
         quickProject=await startup.read('quick_project',()=>p.evaluate(async projectId=>{
@@ -139,7 +144,7 @@ export async function open({onCleanup, fixture, onOpening, reducedOpening = fals
         if(quickProject.project_id!==fixture.project_id || quickProject.metadata?.purpose!=='synthetic Plan 77 save-loop fixture') throw new Error('quick project is not the synthetic Plan 77 sandbox fixture');
         quickBaseline = await startup.read('quick_before_open', () => publicSnapshot(p, process.env.SAVE_LOOP_BASE_URL, fixture, {allowEmpty:clipCount===0}));
         if (!sameIds(quickBaseline.clipIds, expected)) throw new Error('quick pre-open public head does not match exact fixture clip IDs');
-        const started=performance.now(), cpuStart=cpu.mark();
+        const started=performance.now(), navigationStartedAt=new Date().toISOString(), cpuStart=cpu.mark();
         await p.goto(URL_, {waitUntil:'domcontentloaded', timeout:startup.remaining()});
         let stableSince=null;
         while (performance.now()<startup.deadline) {
@@ -158,7 +163,10 @@ export async function open({onCleanup, fixture, onOpening, reducedOpening = fals
             stableSince??=performance.now();
             if (performance.now()-stableSince>=800) {
               quickMarker=performance.now();
-              const value={type:'quick_opening',first_usable_ms:quickMarker-started,target_pass:quickMarker-started<=5000,stable_ms:quickMarker-stableSince,baseline:{headRevision:quickBaseline.headRevision,publicationId:quickBaseline.publicationId},cpu:cpu.delta(cpuStart,'quick_cold_open'),limitation:'Exact fixture IDs and tracks with a visible writable track-name control and Saved are stable. The editor does not expose rendered head identity.'};
+              const value={type:'quick_opening',pre_navigation_setup_started_at:preNavigationStartedAt,pre_navigation_setup_ms:started-preNavigationStart,
+                navigation_started_at:navigationStartedAt,first_usable_ms:quickMarker-started,target_pass:quickMarker-started<=5000,stable_ms:quickMarker-stableSince,
+                baseline:{headRevision:quickBaseline.headRevision,publicationId:quickBaseline.publicationId},cpu:cpu.delta(cpuStart,'quick_cold_open'),
+                limitation:'Pre-open project and exact public-snapshot verification is reported separately and excluded from navigation duration. Exact fixture IDs and tracks with a visible writable track-name control and Saved are stable; rendered head identity is not exposed.'};
               if (onProvisional) onProvisional({warm:false,value,page:p,startup,marker:quickMarker});
               return value;
             }

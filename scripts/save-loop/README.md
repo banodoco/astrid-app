@@ -49,6 +49,102 @@ empty), a size/history problem (small green and large red), a save-path problem
 save green). A red large v30 row alone does not show whether the seed history
 or clip count caused the result; its label is `heavy seed history, worst case`.
 
+### Four-row offline backup/restore workflow
+
+`quick-backup-cycle.sh` operates on a prepared local stack and does not install
+or change product pins. It requires the exact App/Agent/Runtime tuple from the
+Round 5 receipts, a matching `.sl1-stack-owned` marker, canonical new output
+paths below this tooling checkout's `.env/quick-indicator` directory, 25 GiB
+free, and an exclusive lock. It refuses a live editor. Runtime backup and
+restore commands perform their built-in verification. Each measured run uses
+a new restore target, adopted data root, and results directory; the active
+workspace is not replaced. The fixture manifest and source version tuple are
+copied into each bundle. Each restore-run requires an explicit expected
+versions JSON; it must match the owned stack's App/Agent/Runtime tuple and the
+clean product App checkout's exact commit. This supports a separately prepared
+candidate tuple without inheriting the baseline pins.
+
+First build each fixture on its owned local stack. The quick-only fixture
+builder accepts an explicit clean product checkout and exact versions file;
+the running editor PID must have that checkout as its working directory and
+the stack tuple must match the file. The normal builder still requires the
+tooling checkout as before.
+
+```sh
+SAVE_LOOP_ROOT=/absolute/owned/stack \
+SAVE_LOOP_BASE_URL=http://127.0.0.1:<editor-port> \
+SAVE_LOOP_PRODUCT_APP=/home/user/codex-run/wt/astrid-app-p77-quick-baseline-product \
+SAVE_LOOP_VERSIONS=/absolute/tooling-checkout.env/quick-indicator/baseline-versions.json \
+SAVE_LOOP_QUICK_FIXTURE=1 SAVE_LOOP_CLIPS=0 \
+SAVE_LOOP_SCRATCH=/absolute/tooling-checkout.env/quick-indicator/fixture-empty \
+node scripts/save-loop/build-fixture.mjs
+```
+
+Use `SAVE_LOOP_CLIPS=10` and `100` with separate scratch directories. The
+empty fixture remains exactly V1/A1 with no clips. Save each printed fixture
+manifest, then stop the fixture stack through its owner. For empty, 10 and 100,
+make one offline backup:
+
+```sh
+scripts/save-loop/quick-backup-cycle.sh backup empty \
+  /absolute/owned/stack /absolute/owned/realm /absolute/owned/runtime-support \
+  /absolute/fixture-manifest.json \
+  /absolute/tooling-checkout.env/quick-indicator/bundles/empty
+```
+
+Repeat with `10` and `100` and distinct realm, manifest and bundle paths.
+For the heavy row, pass the exact approved restored source
+`/home/user/codex-run/run/evidence/plan-77/growth-profile/v30-owned-synthetic-restored-realm`
+as the realm argument, and a new support-root path below the owned stack. The
+command verifies its receipt and database SHA-256, refuses WAL/SHM sidecars,
+copies it into marker-owned staging, then uses the installed Runtime's normal
+backup command. It never reads the missing old authentication key or changes
+the source. Runtime's normal restore verifies each per-run copy. Supply the
+verified v30 fixture manifest.
+
+For each bundle, call `restore-run` with a new owned stack root and result
+paths. The Runtime restore destination and adopted data root are generated
+under that stack. Ports must be unused and owned by this run; Chrome must be
+provided through `SAVE_LOOP_CHROME`.
+
+```sh
+SAVE_LOOP_CHROME=/absolute/path/to/chrome \
+scripts/save-loop/quick-backup-cycle.sh restore-run empty \
+  /absolute/tooling-checkout.env/quick-indicator/bundles/empty \
+  /absolute/tooling-checkout.env/quick-indicator/bundles/empty/versions.json \
+  /absolute/owned/new-stack PROJECT-UUID /absolute/owned/new-stack/source-manifest.json \
+  /home/user/codex-run/wt/astrid-app-p77-quick-baseline-product 18120 18121 18122 \
+  /absolute/owned/new-stack/results-empty /absolute/owned/new-stack/startup-empty.json
+```
+
+Run once for each size with distinct bundle, stack and outputs. For the heavy
+row only, set `SAVE_LOOP_QUICK_WARM_RELOAD=1` to record an additional same-
+profile reload after the immediate and quiet arms have completed and guarded
+Undo has verified a clean public head. It does not delay those arms. The startup
+probe runs concurrently with the quick sweep from the owned `astrid-runtime
+up` process launch. It checks exact project, timeline, head revision and
+publication fields through the local App Runtime discovery proxy; that proxy
+injects the current Runtime bearer token from its owned discovery record. The
+startup duration is a separate `runtime_startup` JSONL record, not the UI
+`post_open_blocked_s` value. If the qualifying read arrives before UI
+navigation, the aggregate marks the blocked value censored because readiness
+may have warmed the cache. A failed or missing metadata answer has a null
+duration and an explicit outcome; it is never a pass.
+
+Print a combined, minute-readable four-row summary from the four JSONL files:
+
+```sh
+node scripts/save-loop/aggregate-quick.mjs \
+  /absolute/owned/new-stack/results-empty/results.jsonl \
+  /absolute/owned/new-stack/results-10/results.jsonl \
+  /absolute/owned/new-stack/results-100/results.jsonl \
+  /absolute/owned/new-stack/results-large/results.jsonl
+```
+
+This workflow has only harness/static proof in this change; it has not been
+run against a Runtime stack or browser. Product/runtime execution remains
+unmeasured until an explicitly scheduled local run.
+
 Use a clean committed App checkout on Linux containing the fixture builder and
 the pinned install manifest and Runtime lock. The tooling has only been
 qualified on Linux; Darwin code paths are not a macOS qualification. Install

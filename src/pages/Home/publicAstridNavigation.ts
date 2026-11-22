@@ -146,10 +146,13 @@ export function usePublicAstridNavigation(environment: PublicAstridEnvironment) 
     }
     const finish = () => {
       // A rejected/skipped transition must still apply the current navigation exactly once.
-      apply();
-      clearMarker(id);
-      pending.release?.();
-      if (pendingRef.current?.id === id) pendingRef.current = null;
+      try {
+        apply();
+      } finally {
+        clearMarker(id);
+        pending.release?.();
+        if (pendingRef.current?.id === id) pendingRef.current = null;
+      }
     };
     try {
       if (page) pending.release = holdPageTransition();

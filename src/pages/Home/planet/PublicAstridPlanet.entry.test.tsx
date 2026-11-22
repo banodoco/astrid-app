@@ -45,6 +45,22 @@ describe('PublicAstridPlanet engine boundary', () => {
     expect(seam.dispose).toHaveBeenCalledTimes(1);
   });
 
+  it('cancels a pending paint frame when unmounted', async () => {
+    const frame = vi.spyOn(window, 'requestAnimationFrame').mockReturnValue(71);
+    const cancel = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => {});
+    const loadEngine = vi.fn(async () => ({ initPlanetEngine: seam.init }));
+    try {
+      const view = render(<PublicAstridPlanet live contentReady loadEngine={loadEngine} />);
+      await waitFor(() => expect(frame).toHaveBeenCalled());
+      view.unmount();
+      expect(cancel).toHaveBeenCalledWith(71);
+      expect(loadEngine).not.toHaveBeenCalled();
+    } finally {
+      frame.mockRestore();
+      cancel.mockRestore();
+    }
+  });
+
   it('does not initialize after unmount during transition or import', async () => {
     let finish!: () => void;
     seam.wait.mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));

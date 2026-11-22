@@ -62,13 +62,13 @@ describe('public vision live data contract', () => {
     expect(result.gaps.length).toBeGreaterThan(0);
   });
 
-  it('accepts a consistent characteristic hierarchy on both pillars and principles', () => {
+  it('accepts a consistent goal hierarchy on both pillars and principles', () => {
     const value = fixture();
     const addStructure = <T extends { id: string; title: string }>(subject: T) => ({
       ...subject,
       statement: 'An opening statement.',
       explanationMarkdown: 'A short explanation of the underlying commitment.',
-      characteristics: [
+      goals: [
         { id: 'agency', title: 'Artistic agency', summary: 'Creators direct their work.', detailsMarkdown: 'People can inspect and adjust their tools.' },
         { id: 'continuity', title: 'Continuity', summary: 'Work stays editable.', detailsMarkdown: 'Projects retain their history across sessions.' },
       ],
@@ -78,13 +78,13 @@ describe('public vision live data contract', () => {
       pillars: value.pillars.map(addStructure),
       principles: value.principles.map(addStructure),
     };
-    expect(parsePublicVisionContent(candidate).pillars[0].characteristics).toHaveLength(2);
+    expect(parsePublicVisionContent(candidate).pillars[0].goals).toHaveLength(2);
     expect(() => parsePublicVisionContent({
       ...candidate, principles: [value.principles[0]],
     })).toThrow(/structured/);
     expect(() => parsePublicVisionContent({
       ...candidate,
-      pillars: [{ ...candidate.pillars[0], characteristics: [{ id: 'x', title: 'Only one', summary: 'One sentence.', detailsMarkdown: 'More.' }] }, ...candidate.pillars.slice(1)],
+      pillars: [{ ...candidate.pillars[0], goals: [{ id: 'x', title: 'Only one', summary: 'One sentence.', detailsMarkdown: 'More.' }] }, ...candidate.pillars.slice(1)],
     })).toThrow(/structured/);
   });
 
@@ -122,39 +122,67 @@ describe('public vision live data contract', () => {
 });
 
 
-describe('aspiration references in schema v1', () => {
-  it('accepts new links and legacy feeds without renaming characteristics', () => {
-    expect(parsePublicVisionContent(visionFixture()).gaps[0].aspiration).toBe('pillar:art/agency');
-    expect(parsePublicVisionContent(legacyVisionFixture()).gaps[0].aspiration).toBeUndefined();
-    const candidate = visionFixture();
-    delete candidate.gaps[1].supportingAspirations;
-    expect(parsePublicVisionContent(candidate).pillars[0].characteristics).toHaveLength(3);
-  });
-  it('rejects a missing aspiration, an unresolved primary or supporting reference, and duplicates', () => {
-    for (const invalid of ['pillar:missing/agency', 'pillar:art/missing', 'pillar:art']) {
-      const candidate = visionFixture(); candidate.gaps[0].aspiration = invalid;
-      expect(() => parsePublicVisionContent(candidate)).toThrow(/aspirations/);
+describe('schema-v1 goal compatibility', () => {
+  it('normalizes legacy wire fields into the canonical Goals model', () => {
+    const snapshot = visionFixture();
+    for (const subject of [...snapshot.pillars, ...snapshot.principles]) {
+      subject.characteristics = subject.goals;
+      delete subject.goals;
     }
-    const missing = visionFixture(); delete missing.gaps[0].aspiration;
-    expect(() => parsePublicVisionContent(missing)).toThrow(/aspirations/);
+    for (const gap of snapshot.gaps) {
+      gap.aspiration = gap.goal;
+      gap.supportingAspirations = gap.supportingGoals;
+      delete gap.goal;
+      delete gap.supportingGoals;
+    }
+    const parsed = parsePublicVisionContent(snapshot);
+    expect(parsed.pillars[0].goals).toHaveLength(3);
+    expect(parsed.gaps[0].goal).toBe('pillar:art/agency');
+    expect(parsed.gaps[0].supportingGoals).toEqual(['principle:open-by-design/agency']);
+  });
+  it('rejects contradictory old and new goal identities', () => {
+    const subjectMismatch = visionFixture();
+    subjectMismatch.pillars[0].characteristics = [{ id: 'other', title: 'Changed', summary: 'Different', detailsMarkdown: 'Different' }];
+    expect(() => parsePublicVisionContent(subjectMismatch)).toThrow(/compatibility fields disagree/);
+    const gapMismatch = visionFixture();
+    gapMismatch.gaps[0].aspiration = 'pillar:art/continuity';
+    expect(() => parsePublicVisionContent(gapMismatch)).toThrow(/compatibility fields disagree/);
+  });
+});
+
+describe('goal references in schema v1', () => {
+  it('accepts new links and legacy feeds without renaming goals', () => {
+    expect(parsePublicVisionContent(visionFixture()).gaps[0].goal).toBe('pillar:art/agency');
+    expect(parsePublicVisionContent(legacyVisionFixture()).gaps[0].goal).toBeUndefined();
+    const candidate = visionFixture();
+    delete candidate.gaps[1].supportingGoals;
+    expect(parsePublicVisionContent(candidate).pillars[0].goals).toHaveLength(3);
+  });
+  it('rejects a missing goal, an unresolved primary or supporting reference, and duplicates', () => {
+    for (const invalid of ['pillar:missing/agency', 'pillar:art/missing', 'pillar:art']) {
+      const candidate = visionFixture(); candidate.gaps[0].goal = invalid;
+      expect(() => parsePublicVisionContent(candidate)).toThrow(/goals/);
+    }
+    const missing = visionFixture(); delete missing.gaps[0].goal;
+    expect(() => parsePublicVisionContent(missing)).toThrow(/goals/);
     for (const refs of [['principle:open-by-design/missing'], ['pillar:art/agency'],
       ['principle:open-by-design/agency', 'principle:open-by-design/agency']]) {
-      const candidate = visionFixture(); candidate.gaps[0].supportingAspirations = refs;
-      expect(() => parsePublicVisionContent(candidate)).toThrow(/aspirations/);
+      const candidate = visionFixture(); candidate.gaps[0].supportingGoals = refs;
+      expect(() => parsePublicVisionContent(candidate)).toThrow(/goals/);
     }
   });
   it('rejects null rather than treating it as an omitted supporting list', () => {
     const candidate = visionFixture();
-    const invalid = { ...candidate, gaps: candidate.gaps.map(gap => ({ ...gap, supportingAspirations: null })) };
-    expect(() => parsePublicVisionContent(invalid)).toThrow(/aspirations/);
+    const invalid = { ...candidate, gaps: candidate.gaps.map(gap => ({ ...gap, supportingGoals: null })) };
+    expect(() => parsePublicVisionContent(invalid)).toThrow(/goals/);
   });
   it('requires the same primary and deduplicated supporting elements in old and new fields', () => {
     const candidate = visionFixture();
-    candidate.gaps[0].supportingAspirations!.push('pillar:art/continuity', 'principle:open-by-design/continuity');
+    candidate.gaps[0].supportingGoals!.push('pillar:art/continuity', 'principle:open-by-design/continuity');
     expect(parsePublicVisionContent(candidate).gaps[0].appliesTo).toHaveLength(2);
     candidate.gaps[0].appliesTo = ['pillar:art'];
     expect(() => parsePublicVisionContent(candidate)).toThrow(/disagree/);
-    const moved = visionFixture(); moved.gaps[0].aspiration = 'pillar:tools/agency';
+    const moved = visionFixture(); moved.gaps[0].goal = 'pillar:tools/agency';
     expect(() => parsePublicVisionContent(moved)).toThrow(/disagree/);
   });
 });

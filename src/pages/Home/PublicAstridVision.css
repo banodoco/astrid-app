@@ -1458,7 +1458,7 @@
 }
 .astrid-vision-details-description p { margin: 0 0 12px; }
 .astrid-vision-details-description a { color: inherit; text-underline-offset: 3px; }
-/* Shared, glanceable characteristic hierarchy for both pillars and principles.
+/* Shared, glanceable goal hierarchy for both pillars and principles.
    Only the summary sentence shows by default; native details keep this
    keyboard-accessible with no extra modal, JavaScript or duplicated prose. */
 .astrid-vision-principle-statement {
@@ -1473,23 +1473,23 @@
   font-weight: 600;
   line-height: 1.45;
 }
-.astrid-vision-details-characteristics {
+.astrid-vision-details-goals {
   margin-top: 28px;
 }
-.astrid-vision-details-characteristics > h3 {
+.astrid-vision-details-goals > h3 {
   margin: 0 0 14px;
   font: 400 24px/1.25 var(--astrid-vision-serif);
 }
-.astrid-vision-details-characteristic-list {
+.astrid-vision-details-goal-list {
   border-top: 1px solid var(--astrid-line);
 }
-.astrid-vision-details-characteristic {
+.astrid-vision-details-goal {
   border-bottom: 1px solid var(--astrid-line);
 }
 /* The gaps section supplies the single divider beneath the last
-   characteristic; don't show two adjacent rules. */
-.astrid-vision-details-characteristic:last-child { border-bottom: 0; }
-.astrid-vision-details-characteristic > summary {
+   goal; don't show two adjacent rules. */
+.astrid-vision-details-goal:last-child { border-bottom: 0; }
+.astrid-vision-details-goal > summary {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -1498,45 +1498,45 @@
   list-style: none;
   -webkit-tap-highlight-color: transparent;
 }
-.astrid-vision-details-characteristic > summary::-webkit-details-marker { display: none; }
-.astrid-vision-details-characteristic-copy {
+.astrid-vision-details-goal > summary::-webkit-details-marker { display: none; }
+.astrid-vision-details-goal-copy {
   display: grid;
   flex: 1;
   gap: 5px;
   min-width: 0;
 }
-.astrid-vision-details-characteristic-copy strong {
+.astrid-vision-details-goal-copy strong {
   color: var(--astrid-ink);
   font: 600 14px/1.35 Inter, ui-sans-serif, system-ui, sans-serif;
 }
-.astrid-vision-details-characteristic-copy > span {
+.astrid-vision-details-goal-copy > span {
   color: var(--astrid-muted);
   font-size: 14px;
   line-height: 1.5;
 }
-.astrid-vision-details-characteristic > summary > svg {
+.astrid-vision-details-goal > summary > svg {
   flex: none;
   color: var(--astrid-accent);
   transition: transform 160ms ease;
 }
-.astrid-vision-details-characteristic[open] > summary > svg { transform: rotate(180deg); }
-.astrid-vision-details-characteristic > summary:hover strong { color: var(--astrid-accent); }
-.astrid-vision-details-characteristic > summary:focus-visible {
+.astrid-vision-details-goal[open] > summary > svg { transform: rotate(180deg); }
+.astrid-vision-details-goal > summary:hover strong { color: var(--astrid-accent); }
+.astrid-vision-details-goal > summary:focus-visible {
   outline: 2px solid var(--astrid-accent);
   outline-offset: -2px;
   border-radius: 5px;
 }
-.astrid-vision-details-characteristic-body {
+.astrid-vision-details-goal-body {
   padding: 0 30px 18px 2px;
   color: var(--astrid-muted);
   font-size: 14px;
   line-height: 1.65;
 }
-.astrid-vision-details-characteristic-body p { margin: 0 0 10px; }
-.astrid-vision-details-characteristic-body p:last-child { margin-bottom: 0; }
-.astrid-vision-details-characteristic-body a { color: inherit; text-underline-offset: 3px; }
+.astrid-vision-details-goal-body p { margin: 0 0 10px; }
+.astrid-vision-details-goal-body p:last-child { margin-bottom: 0; }
+.astrid-vision-details-goal-body a { color: inherit; text-underline-offset: 3px; }
 @media (prefers-reduced-motion: reduce) {
-  .astrid-vision-details-characteristic > summary > svg { transition: none; }
+  .astrid-vision-details-goal > summary > svg { transition: none; }
 }
 .astrid-vision-details-gaps {
   margin-top: 32px;
@@ -2151,15 +2151,15 @@
   mask-image: linear-gradient(to bottom, transparent, #000 70%);
 }
 
-/* Aspirations own their gap disclosures. Gap names and priority previews remain
-   visible while both the aspiration's prose and the gap's evidence are closed. */
-.astrid-vision-details-aspiration {
+/* Goals own their gap disclosures. Gap names and priority previews remain
+   visible while both the goal's prose and the gap's evidence are closed. */
+.astrid-vision-details-goal {
   padding-bottom: 18px;
   border-bottom: 1px solid var(--astrid-line);
 }
-.astrid-vision-details-aspiration:last-child { border-bottom: 0; }
-.astrid-vision-details-aspiration > .astrid-vision-details-characteristic { border: 0; }
-.astrid-vision-details-aspiration-gaps {
+.astrid-vision-details-goal:last-child { border-bottom: 0; }
+.astrid-vision-details-goal > .astrid-vision-details-goal { border: 0; }
+.astrid-vision-details-goal-gaps {
   display: grid;
   gap: 9px;
   margin: 0 0 0 10px;
@@ -2167,7 +2167,7 @@
   border-left: 1px solid var(--astrid-line);
   list-style: none;
 }
-.astrid-vision-details-aspiration-empty {
+.astrid-vision-details-goal-empty {
   margin: 0 2px;
   color: var(--astrid-muted);
   font-size: 12px;
@@ -2216,11 +2216,11 @@
 .astrid-vision-details-gap-description a { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
 .astrid-vision-details-supporting { margin: 0; padding: 12px 18px 16px; color: var(--astrid-muted); font-size: 12px; line-height: 1.6; }
 .astrid-vision-details-supporting strong { color: var(--astrid-ink); font-weight: 500; }
-.astrid-vision-details-characteristic-body ul,
+.astrid-vision-details-goal-body ul,
 .astrid-vision-details-gap-description ul { list-style: disc; padding-left: 1.3em; margin: 8px 0 14px; }
-.astrid-vision-details-characteristic-body ol,
+.astrid-vision-details-goal-body ol,
 .astrid-vision-details-gap-description ol { list-style: decimal; padding-left: 1.3em; margin: 8px 0 14px; }
-.astrid-vision-details-characteristic-body li,
+.astrid-vision-details-goal-body li,
 .astrid-vision-details-gap-description li { margin: 4px 0; padding-left: 2px; }
 @media (prefers-reduced-motion: reduce) {
   .astrid-vision-details-gap-summary > svg { transition: none; }

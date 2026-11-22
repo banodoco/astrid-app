@@ -2,7 +2,7 @@ import { VisionDialog } from './VisionDialog';
 import ReactMarkdown from 'react-markdown';
 import { ChevronDown, ExternalLink } from 'lucide-react';
 import type { PublicVisionContent, PublicVisionProject } from './publicVisionContent';
-import { aspirationsForSubject, splitAspirationDetails, type VisionGapProjects, type VisionSubject } from './visionHierarchy';
+import { goalsForSubject, splitGoalDetails, type VisionGapProjects, type VisionSubject } from './visionHierarchy';
 import './VisionProjectDisclosure.css';
 
 // Editorial accents retain the same identity across pillar and principle dialogs.
@@ -34,8 +34,8 @@ function GapProjects({ projects }: { projects: PublicVisionProject[] }) {
   );
 }
 
-function AspirationDetails({ markdown }: { markdown: string }) {
-  const { explanation, guidance, label } = splitAspirationDetails(markdown);
+function GoalDetails({ markdown }: { markdown: string }) {
+  const { explanation, guidance, label } = splitGoalDetails(markdown);
   return <>
     {explanation && <ReactMarkdown>{explanation}</ReactMarkdown>}
     {guidance && <details className="astrid-vision-guidance">
@@ -56,7 +56,7 @@ function GapDesiredState({ markdown }: { markdown: string }) {
   );
 }
 
-function AspirationGap({ content, item }: { content: PublicVisionContent; item: VisionGapProjects }) {
+function GoalGap({ content, item }: { content: PublicVisionContent; item: VisionGapProjects }) {
   const { gap, projects } = item;
   const tone = GAP_TONES[content.gaps.findIndex(candidate => candidate.id === gap.id) % GAP_TONES.length];
   return (
@@ -89,7 +89,7 @@ export function VisionDetailDialog({
   const entry = subject.kind === 'pillar'
     ? content.pillars.find(pillar => pillar.id === subject.id)
     : content.principles.find(principle => principle.id === subject.id);
-  const hierarchy = aspirationsForSubject(content, subject);
+  const hierarchy = goalsForSubject(content, subject);
   if (!entry) return null;
   const siblings = subject.kind === 'pillar' ? content.pillars : content.principles;
   const index = siblings.findIndex(item => item.id === subject.id);
@@ -103,33 +103,33 @@ export function VisionDetailDialog({
         onClick: () => onSelect({ kind: subject.kind, id: previous.id }) } : undefined}
       next={next ? { label: 'Next ' + subject.kind + ': ' + next.title,
         onClick: () => onSelect({ kind: subject.kind, id: next.id }) } : undefined}>
-              {entry.statement && entry.explanationMarkdown && entry.characteristics ? (
+              {entry.statement && entry.explanationMarkdown && entry.goals ? (
                 <>
                   <div className="astrid-vision-details-description">
                     <p className="astrid-vision-details-statement">{entry.statement}</p>
                     <ReactMarkdown>{entry.explanationMarkdown}</ReactMarkdown>
                   </div>
-                  <section className="astrid-vision-details-characteristics" aria-label="Goals">
+                  <section className="astrid-vision-details-goals" aria-label="Goals">
                     <h3>Goals</h3>
-                    <div className="astrid-vision-details-characteristic-list">
-                      {hierarchy.aspirations.map(({ aspiration, gaps }) => (
-                        <section className="astrid-vision-details-aspiration" key={aspiration.id} data-aspiration-id={aspiration.id}>
-                          <details className="astrid-vision-details-characteristic">
+                    <div className="astrid-vision-details-goal-list">
+                      {hierarchy.goals.map(({ goal, gaps }) => (
+                        <section className="astrid-vision-details-goal" key={goal.id} data-goal-id={goal.id}>
+                          <details className="astrid-vision-details-goal">
                             <summary>
-                              <span className="astrid-vision-details-characteristic-copy">
-                                <strong>{aspiration.title}</strong><span>{aspiration.summary}</span>
+                              <span className="astrid-vision-details-goal-copy">
+                                <strong>{goal.title}</strong><span>{goal.summary}</span>
                               </span>
                               <ChevronDown size={18} strokeWidth={1.75} aria-hidden="true" />
                             </summary>
-                            <div className="astrid-vision-details-characteristic-body">
-                              <AspirationDetails markdown={aspiration.detailsMarkdown} />
+                            <div className="astrid-vision-details-goal-body">
+                              <GoalDetails markdown={goal.detailsMarkdown} />
                             </div>
                           </details>
                           {gaps.length > 0 && (
                             <div className="astrid-vision-details-gap-group">
                               <h4 className="astrid-vision-details-gap-group-label">{gaps.length === 1 ? 'Gap' : 'Gaps'}</h4>
-                              <ul className="astrid-vision-details-aspiration-gaps" aria-label={'Gaps for ' + aspiration.title}>
-                                {gaps.map(item => <li key={item.gap.id}><AspirationGap content={content} item={item} /></li>)}
+                              <ul className="astrid-vision-details-goal-gaps" aria-label={'Gaps for ' + goal.title}>
+                                {gaps.map(item => <li key={item.gap.id}><GoalGap content={content} item={item} /></li>)}
                               </ul>
                             </div>
                           )}

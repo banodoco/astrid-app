@@ -41,7 +41,7 @@ on:
       - "src/pages/Home/publicVisionContent.ts"
       - "src/pages/Home/publicVisionContent.test.ts"
       - "tests/fixtures/public-vision.ts"
-      - "tests/e2e/public-astrid-vision-aspirations.spec.ts"
+      - "tests/e2e/public-astrid-vision-goals.spec.ts"
       - "playwright.vision.config.ts"
       - "src/pages/Home/publicAstridShare.ts"
       - "tests/e2e/public-astrid-vision-content.spec.ts"
@@ -50,7 +50,7 @@ on:
       - "tests/e2e/public-astrid-vision-layout-feedback.spec.ts"
       - "tests/e2e/public-astrid-vision-hierarchy.spec.ts"
       - "tests/e2e/public-astrid-vision-sigils-nav.spec.ts"
-      - "tests/e2e/public-astrid-vision-characteristics.spec.ts"
+      - "tests/e2e/public-astrid-vision-goal-disclosure.spec.ts"
       - "package.json"
       - ".github/workflows/public-vision.yml"
       - ".github/workflows/served-manifest-canary.yml"
@@ -94,7 +94,7 @@ jobs:
       - name: Verify vision content on desktop and phone
         env:
           PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/vision-captures/chromium-results.json
-        run: npx playwright test --config playwright.config.ts tests/e2e/public-astrid-vision-content.spec.ts tests/e2e/public-astrid-vision-captures.spec.ts tests/e2e/public-astrid-vision-mobile-feedback.spec.ts tests/e2e/public-astrid-vision-layout-feedback.spec.ts tests/e2e/public-astrid-vision-hierarchy.spec.ts tests/e2e/public-astrid-vision-sigils-nav.spec.ts tests/e2e/public-astrid-vision-characteristics.spec.ts tests/e2e/public-astrid-vision-aspirations.spec.ts tests/e2e/public-astrid-vision-mobile-catalogs.spec.ts tests/e2e/public-astrid-vision-polish.spec.ts tests/e2e/public-astrid-vision-stability.spec.ts tests/e2e/public-astrid-vision-entry.spec.ts tests/e2e/public-astrid-home-chips.spec.ts tests/e2e/public-astrid-roundtrip.spec.ts --project=chromium-desktop --output=test-results/chromium --reporter=line,json
+        run: npx playwright test --config playwright.config.ts tests/e2e/public-astrid-vision-content.spec.ts tests/e2e/public-astrid-vision-captures.spec.ts tests/e2e/public-astrid-vision-mobile-feedback.spec.ts tests/e2e/public-astrid-vision-layout-feedback.spec.ts tests/e2e/public-astrid-vision-hierarchy.spec.ts tests/e2e/public-astrid-vision-sigils-nav.spec.ts tests/e2e/public-astrid-vision-goal-disclosure.spec.ts tests/e2e/public-astrid-vision-goals.spec.ts tests/e2e/public-astrid-vision-mobile-catalogs.spec.ts tests/e2e/public-astrid-vision-polish.spec.ts tests/e2e/public-astrid-vision-stability.spec.ts tests/e2e/public-astrid-vision-entry.spec.ts tests/e2e/public-astrid-home-chips.spec.ts tests/e2e/public-astrid-roundtrip.spec.ts --project=chromium-desktop --output=test-results/chromium --reporter=line,json
       - name: Verify native dialog touch behavior in WebKit
         if: ${{ !cancelled() && steps.browsers.outcome == 'success' }}
         env:

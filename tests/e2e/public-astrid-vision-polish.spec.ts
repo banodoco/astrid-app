@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import type { PublicVisionContent } from '../../src/pages/Home/publicVisionContent';
+import { parsePublicVisionContent, type PublicVisionContent } from '../../src/pages/Home/publicVisionContent';
 import { visionFixture } from '../fixtures/public-vision';
 
 const FEED = 'https://raw.githubusercontent.com/banodoco/astrid-dev/vision-published/vision.json';
@@ -9,7 +9,7 @@ const folder = 'test-results/vision-captures';
 async function pinLive(page: Page) {
   const response = await page.request.get(FEED);
   expect(response.ok()).toBeTruthy();
-  const feed = await response.json() as PublicVisionContent;
+  const feed = parsePublicVisionContent(await response.json());
   await page.route(FEED, route => route.fulfill({ json: feed }));
   return feed;
 }
@@ -118,12 +118,12 @@ for (const width of [390, 1440]) {
     const intro = dialog.locator('.astrid-vision-details-description');
     await expect(intro).toHaveCSS('border-bottom-width', '1px');
     const introBox = (await intro.boundingBox())!;
-    const restBox = (await dialog.locator('.astrid-vision-details-characteristics').boundingBox())!;
+    const restBox = (await dialog.locator('.astrid-vision-details-goals').boundingBox())!;
     expect(restBox.y - introBox.y - introBox.height).toBeGreaterThanOrEqual(20);
     mkdirSync(folder, { recursive: true });
     await page.screenshot({ path: `${folder}/real-polished-popup-${info.project.name}-${width}.png` });
     await page.keyboard.press('Escape');
-    const gap = feed.gaps.find(g => g.assessment !== 'closed' && g.aspiration && g.primaryAppliesTo?.startsWith('pillar:') &&
+    const gap = feed.gaps.find(g => g.assessment !== 'closed' && g.goal && g.primaryAppliesTo?.startsWith('pillar:') &&
       feed.projects.some(p => (p.primaryGapId ?? p.gapIds[0]) === g.id))!;
     const pillar = feed.pillars.find(p => 'pillar:' + p.id === gap.primaryAppliesTo)!;
     await page.getByRole('button', { name: 'Explore ' + pillar.title + ': gaps and projects', exact: true }).click();
@@ -144,15 +144,15 @@ for (const width of [390, 1440]) {
   });
 }
 
-test('optional aspiration commitments are separately collapsed and empty projects stay silent', async ({ page }, info) => {
+test('optional goal commitments are separately collapsed and empty projects stay silent', async ({ page }, info) => {
   const feed = visionFixture();
   await page.route(FEED, route => route.fulfill({ json: feed }));
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
   await page.getByRole('button', { name: 'Explore Artistic ambition: gaps and projects' }).click();
   const dialog = page.getByRole('dialog');
-  const aspirations = dialog.locator('.astrid-vision-details-characteristic');
-  const first = aspirations.first();
+  const goals = dialog.locator('.astrid-vision-details-goal');
+  const first = goals.first();
   await expect(first.locator('.astrid-vision-guidance > summary')).toBeHidden();
   await first.locator(':scope > summary').click();
   const guidance = first.locator('.astrid-vision-guidance');
@@ -166,7 +166,7 @@ test('optional aspiration commitments are separately collapsed and empty project
   await page.keyboard.press('Space');
   await expect(guidance.locator('.astrid-vision-guidance-body')).toBeHidden();
   await expect(first).toHaveAttribute('open', '');
-  await expect(aspirations.nth(1).locator('.astrid-vision-guidance')).toHaveCount(0);
+  await expect(goals.nth(1).locator('.astrid-vision-guidance')).toHaveCount(0);
   const emptyGap = dialog.locator('[data-gap-id="AA-002"]');
   await emptyGap.locator(':scope > summary').click();
   await expect(emptyGap.locator('.astrid-vision-details-gap-description')).toBeVisible();

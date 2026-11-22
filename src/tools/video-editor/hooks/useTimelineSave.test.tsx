@@ -1649,6 +1649,104 @@ describe('useTimelineSave — recovered draft durability', () => {
     }
   });
 
+  it('restores top-level parent clips from a same-head Runtime poll after the move ACK', async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(navigator, 'locks');
+    Object.defineProperty(navigator, 'locks', { configurable: true, value: {
+      request: async (_name: string, _options: unknown, work: (lock: object) => Promise<unknown>) => work({}),
+    } });
+    const scope = { realmId: 'realm', actorId: 'actor', projectId: 'project-commit', timelineId: 'timeline-1' };
+    const config = createDefaultTimelineConfig();
+    config.output = { resolution: '1280x720', fps: 30, file: 'out.mp4' };
+    config.clips = [{ id: 'source', at: 0, track: 'V1', clipType: 'hold', hold: 2 }];
+    const moved = { ...config, clips: [{ ...config.clips[0], at: 5 }] };
+    const parent = ({ clips, output, ...authored }: typeof config) => ({
+      config: { ...authored, output: { fps: output.fps, file: output.file } },
+      clips, registry: { assets: {} }, occurrences: [],
+    });
+    const bootstrap = acceptedCommit({ revision_id: 'r0', publication_id: 'p0' }, { revision_id: 'r0', publication_id: 'p0' }, scope);
+    bootstrap.data.canonical_document.parent_revision.payload = parent(config);
+    bootstrap.data.canonical_document.parent_revision.content_digest = fixtureDigest(parent(config));
+    const fixture = runtimeFixture({ ...scope, headRevisionId: 'r0', parentComposition: parent(config) });
+    const timelinePath = `/v1/projects/${scope.projectId}/timelines/${scope.timelineId}`;
+    const posts: CommitRequest[] = [];
+    const runtime = new RuntimeDataProvider({ projectId: scope.projectId, transport: async (method, path, headers, body) => {
+      if (method === 'POST' && path === `${timelinePath}/commit`) {
+        const request = JSON.parse(new TextDecoder().decode(body)) as CommitRequest;
+        const payload = parent(moved);
+        posts.push(request);
+        const revisionId = `r${posts.length}`;
+        const reply = acceptedCommit({ revision_id: revisionId, publication_id: `p${posts.length}` },
+          { revision_id: request.base_revision_id, publication_id: request.base_publication_id }, { ...scope, commands: request.commands });
+        reply.data.canonical_document.parent_revision.payload = payload;
+        reply.data.canonical_document.parent_revision.content_digest = fixtureDigest(payload);
+        reply.data.document_digest = fixtureDigest(reply.data.canonical_document);
+        Object.assign(reply.data, { label: request.label, steps: request.steps, merge_mode: request.merge });
+        reply.receipt.idempotency_key = headers['Idempotency-Key'];
+        fixture.setHead(revisionId, payload);
+        return { status: 200, headers: {}, body: json(reply) };
+      }
+      const response = await fixture.transport(method, path, headers, body);
+      if (method === 'GET' && path === timelinePath) {
+        const record = JSON.parse(new TextDecoder().decode(response.body as Uint8Array));
+        return { ...response, body: json({ ...record, head_publication_id: `p${posts.length}` }) };
+      }
+      return response;
+    } });
+    const readDisplay = async (poll = false) => {
+      const { timeline, registry } = await runtime.loadReferencedTimeline(scope.timelineId, { poll });
+      return buildTimelineData(timeline.config, registry, undefined, timeline.configVersion, undefined, timeline.head);
+    };
+    const data = await readDisplay();
+    const harness = setup(async () => { throw new Error('No legacy save'); }, undefined, {
+      data,
+      loadBasis: async () => ({ head: { revisionId: 'r0', publicationId: 'p0' }, canonicalDocument: bootstrap.data.canonical_document }),
+      capabilities: {
+        getRecoverableIdentity: async () => ({ realmId: scope.realmId, actorId: scope.actorId }),
+        commitTimeline: (request, key) => runtime.commitTimeline(request, key),
+        saveTimelineAtHead: runtime.saveTimelineAtHead.bind(runtime),
+      },
+    });
+    try {
+      const editor = () => harness.hook.result.current;
+      await vi.waitFor(() => expect(editor().isTimelineEditingReady()).toBe(true));
+      await settleInitialRecoveryCheck();
+      const movedDisplay = await buildTimelineData({ ...data.config, clips: moved.clips }, data.registry, undefined, data.configVersion, undefined, data.head);
+      await act(async () => {
+        editor().commitData(movedDisplay, { save: true, gestureBasis: {
+          kind: 'move', clipId: 'source', trackId: 'V1', config: data.config, registry: data.registry,
+        } });
+        await editor().flushPendingSave();
+      });
+      expect(posts).toHaveLength(1);
+      expect(posts[0].commands[0].args.changes).toEqual([
+        { op: 'set', ref: 'parent', path: ['clips', 'id:source', 'at'], before: { state: 'present', value: 0 }, value: 5 },
+      ]);
+      const accepted = editor().dataRef.current!;
+      expect(accepted.head).toMatchObject({ headRevisionId: 'r1', headPublicationId: 'p1' });
+      expect(accepted.config.clips).toEqual([]);
+      const [settledMove] = await createCommitOutbox().list(scope);
+      expect(settledMove.accepted?.value).toMatchObject({ canonicalDocument: { parent_revision: { payload: parent(moved) } } });
+      expect((settledMove.accepted!.value as { canonicalDocument: typeof bootstrap.data.canonical_document })
+        .canonicalDocument.parent_revision.payload.config.output).toEqual(parent(config).config.output);
+
+      const poll = await readDisplay(true);
+      expect(poll.head).toEqual(accepted.head);
+      expect(poll.config.output).toEqual({ ...config.output, background: null, background_scale: null });
+      act(() => harness.poll(poll));
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      const afterPoll = editor().dataRef.current!;
+      expect(afterPoll.head).toEqual(poll.head);
+      expect(poll.config.clips).toMatchObject([{ id: 'source', at: 5 }]);
+      expect(afterPoll.config.clips).toEqual(poll.config.clips);
+      expect(harness.toast.error).not.toHaveBeenCalled();
+      expect(harness.saveTimeline).not.toHaveBeenCalled();
+    } finally {
+      harness.hook.unmount();
+      if (descriptor) Object.defineProperty(navigator, 'locks', descriptor);
+      else Reflect.deleteProperty(navigator, 'locks');
+    }
+  });
+
   it.each([400, 404, 405, 413, 422])('FIX16-R2-COPY-%s exports later edits and keeps edits added after Copy', async status => {
     const { mount, edit, locks, restoreLocks, send, scope } = await setupRefusedSave(status);
     const first = mount();

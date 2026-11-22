@@ -11,8 +11,9 @@ import { VideoEditorProvider } from '../../contexts/VideoEditorProvider';
 import { useVideoEditorRuntime } from '../../contexts/VideoEditorRuntimeContext';
 import type { DataProvider, TimelineCommandBasis } from '../../data/DataProvider';
 import { useTimelineChromeContext, useTimelineEditorData, useTimelineEditorOps } from '../../hooks/timelineStore';
-import { createDefaultTimelineConfig } from '../../lib/defaults';
-import { buildTimelineData } from '../../lib/timeline-data';
+import { timelineQueryKey } from '../../hooks/useTimeline';
+import { createDefaultTimelineConfig, withDefaultTimelineOutput } from '../../lib/defaults';
+import { buildTimelineData, type TimelineData } from '../../lib/timeline-data';
 import type { TimelineEditability } from '../../lib/timeline-editability';
 import type { TimelineConfig } from '../../types';
 import { TimelineEditorCore } from './TimelineEditorCore';
@@ -51,7 +52,7 @@ afterEach(() => {
   else Reflect.deleteProperty(navigator, 'locks');
 });
 
-async function makeSource(hold: 'original' | 'identity' | 'none' = 'original') {
+async function makeSource(hold: 'original' | 'identity' | 'none' = 'original', sparseOutput = false) {
   const gate = deferred();
   const config = { ...createDefaultTimelineConfig(),
     tracks: [{ id: 'V1', kind: 'visual' as const, label: 'V1' }],
@@ -59,11 +60,15 @@ async function makeSource(hold: 'original' | 'identity' | 'none' = 'original') {
   };
   const document = acceptedCommit({ revision_id: 'r0', publication_id: 'p0' },
     { revision_id: 'r0', publication_id: 'p0' }, { projectId, timelineId }).data.canonical_document;
-  document.parent_revision.payload = { config, clips: config.clips, registry: { assets: {} }, occurrences: [] };
+  const authored = sparseOutput
+    ? { ...config, output: { file: config.output.file, fps: config.output.fps, resolution: config.output.resolution } }
+    : config;
+  document.parent_revision.payload = { config: authored, clips: config.clips, registry: { assets: {} }, occurrences: [] };
   document.parent_revision.content_digest = fixtureDigest(document.parent_revision.payload);
   let basis: TimelineCommandBasis = { head: { revisionId: 'r0', publicationId: 'p0' }, canonicalDocument: document };
   const initialData = await buildTimelineData(config, { assets: {} }, async file => file, 1, undefined,
     { projectId, timelineId, headRevisionId: 'r0', headPublicationId: 'p0' });
+  let acceptedCount = 0;
   const commit = vi.fn<NonNullable<DataProvider['commitTimeline']>>(async (request, key) => {
     const next = structuredClone(basis.canonicalDocument);
     for (const command of request.commands) {
@@ -78,16 +83,18 @@ async function makeSource(hold: 'original' | 'identity' | 'none' = 'original') {
         else (target as Record<string, unknown>)[field] = structuredClone(change.value);
       }
     }
-    next.parent_revision.revision_id = 'r1';
+    acceptedCount += 1;
+    const head = { revisionId: `r${acceptedCount}`, publicationId: `p${acceptedCount}` };
+    next.parent_revision.revision_id = head.revisionId;
     next.parent_revision.content_digest = fixtureDigest(next.parent_revision.payload);
-    const response = acceptedCommit({ revision_id: 'r1', publication_id: 'p1' },
+    const response = acceptedCommit({ revision_id: head.revisionId, publication_id: head.publicationId },
       { revision_id: request.base_revision_id, publication_id: request.base_publication_id },
       { projectId, timelineId, commands: request.commands });
     Object.assign(response.data, { canonical_document: next, document_digest: fixtureDigest(next),
       merge_mode: request.merge, steps: request.steps, label: request.label, source: request.source });
     response.receipt.idempotency_key = key;
     response.receipt.result = response.data;
-    basis = { head: { revisionId: 'r1', publicationId: 'p1' }, canonicalDocument: next };
+    basis = { head, canonicalDocument: next };
     return { response, accepted: basis.head, canonicalDocument: next, graph: {}, receipt: response.receipt };
   });
   const loadBasis = vi.fn(async () => {
@@ -104,6 +111,17 @@ async function makeSource(hold: 'original' | 'identity' | 'none' = 'original') {
     saveTimeline: vi.fn(), loadTimelineCommandBasis: loadBasis, getRecoverableIdentity: identity,
     commitTimeline: commit,
   };
+  if (sparseOutput) {
+    provider.saveTimelineAtHead = vi.fn(async () => { throw new Error('Expected a document commit'); });
+    provider.loadReferencedTimeline = async () => ({
+      timeline: {
+        config: withDefaultTimelineOutput(basis.canonicalDocument.parent_revision.payload.config as unknown as TimelineConfig),
+        configVersion: acceptedCount + 1,
+        head: { projectId, timelineId, headRevisionId: basis.head.revisionId, headPublicationId: basis.head.publicationId },
+      },
+      registry: initialData.registry,
+    });
+  }
   return { gate, config, initialData, provider, loadBasis, identity, commit,
     getBasis: () => structuredClone(basis) };
 }
@@ -136,6 +154,7 @@ function mountCore(source: Source, editability?: TimelineEditability) {
   }
   const view = render(tree(source));
   return { view, getEditor: () => editor, getChrome: () => chrome, getOps: () => ops, getRuntime: () => runtime,
+    client,
     replaceSource(next: Source) { sources.push(next); view.rerender(tree(next)); },
     dispose() { sources.forEach(current => current.gate.resolve()); view.unmount(); client.clear(); },
   };
@@ -335,4 +354,45 @@ describe('C4 production track-name presentation during save readiness (#966)', (
       expect(source.provider.saveTimeline).not.toHaveBeenCalled();
     } finally { mounted.dispose(); }
   });
+});
+
+it('keeps and saves a track rename after polling the already accepted move', async () => {
+  const source = await makeSource('none', true);
+  const mounted = mountCore(source);
+  try {
+    await waitFor(() => expect(mounted.getRuntime().timelineEditability?.checkTimeline?.().allowed).toBe(true));
+    act(() => mounted.getOps().moveClipToRow('existing', 'V1', 5));
+    await act(async () => { await mounted.getChrome().flushPendingSave(); });
+    expect(source.commit).toHaveBeenCalledTimes(1);
+    expect(source.getBasis().head).toEqual({ revisionId: 'r1', publicationId: 'p1' });
+    expect(mounted.getEditor().dataRef.current?.config.clips[0].at).toBe(5);
+    expect(mounted.getEditor().dataRef.current?.config.output).not.toHaveProperty('background');
+
+    const queryKey = timelineQueryKey(timelineId);
+    await act(async () => { await mounted.client.refetchQueries({ queryKey, exact: true }); });
+    const polled = mounted.client.getQueryData<TimelineData>(queryKey);
+    expect(polled?.head).toMatchObject({ headRevisionId: 'r1', headPublicationId: 'p1' });
+    expect(polled?.config.output).toMatchObject({ background: null, background_scale: null });
+    // Let the query notify React, then let the poll effect's deferred adoption run.
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+
+    const input = screen.getByRole('textbox', { name: 'Track name' });
+    inputEnterBlur(input, renamed);
+    await act(async () => { await mounted.getChrome().flushPendingSave(); });
+    expect(input).toHaveValue(renamed);
+    expect(source.commit).toHaveBeenCalledTimes(2);
+    expect(source.commit.mock.calls[1][0]).toMatchObject({
+      base_revision_id: 'r1',
+      base_publication_id: 'p1',
+      commands: [{ op: 'doc.patch', args: { changes: [{
+        op: 'set', ref: 'parent', path: ['config', 'tracks', 'id:V1', 'label'], value: renamed,
+      }] } }],
+    });
+    expect(source.commit.mock.calls[1][0].commands[0].args.changes).toHaveLength(1);
+    expect(source.getBasis().head).toEqual({ revisionId: 'r2', publicationId: 'p2' });
+    const saved = source.getBasis().canonicalDocument.parent_revision.payload.config as unknown as TimelineConfig;
+    expect(saved.clips[0].at).toBe(5);
+    expect(saved.tracks[0].label).toBe(renamed);
+  } finally { mounted.dispose(); }
 });

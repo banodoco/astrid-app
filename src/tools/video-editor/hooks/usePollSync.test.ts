@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 import { renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import { createDefaultTimelineConfig } from '@/tools/video-editor/lib/defaults';
 import { shouldAcceptPolledData } from '@/tools/video-editor/lib/timeline-save-utils';
 import { createInteractionState } from '@/tools/video-editor/lib/interaction-state';
 import { getTimelinePollRejectionReason, isTimelinePollIdle, usePollSync } from '@/tools/video-editor/hooks/usePollSync';
 import type { DataProvider } from '@/tools/video-editor/data/DataProvider';
-import type { TimelineData } from '@/tools/video-editor/lib/timeline-data';
+import { buildTimelineData, type TimelineData } from '@/tools/video-editor/lib/timeline-data';
 
 function getLegacyPollRejectionReason(input: {
   editSeq: number;
@@ -44,6 +45,43 @@ function getLegacyPollRejectionReason(input: {
 }
 
 describe('usePollSync helpers', () => {
+  it('adopts a same-publication poll with a different opaque output field', async () => {
+    const head = { projectId: 'project', timelineId: 'timeline', headRevisionId: 'r1', headPublicationId: 'p1' };
+    const config = createDefaultTimelineConfig();
+    const registry = { assets: {} };
+    const output = (value: number) => ({ ...config.output, extension: { value } });
+    const mounted = await buildTimelineData({ ...config, output: output(0) }, registry, undefined, 1, undefined, head);
+    const polled = await buildTimelineData({ ...config, output: output(1) }, registry, undefined, 1, undefined, head);
+    expect(polled.stableSignature).not.toBe(mounted.stableSignature);
+    const commitData = vi.fn();
+    const provider: DataProvider = {
+      loadTimeline: vi.fn(), saveTimeline: vi.fn(), saveTimelineAtHead: vi.fn(),
+      loadAssetRegistry: vi.fn(), resolveAssetUrl: vi.fn(),
+    };
+    const hook = renderHook(() => usePollSync({
+      queries: { timelineQuery: { data: polled, isLoading: false }, assetRegistryQuery: { data: undefined } },
+      provider,
+      commitData,
+      dataRef: { current: mounted },
+      selectedClipIdRef: { current: null },
+      selectedTrackIdRef: { current: null },
+      editSeqRef: { current: 0 },
+      pendingOpsRef: { current: 0 },
+      savedSeqRef: { current: 0 },
+      configVersionRef: { current: mounted.configVersion },
+      headRevisionRef: { current: head },
+      lastSavedSignatureRef: { current: mounted.stableSignature },
+      isSavingRef: { current: false },
+      interactionStateRef: { current: createInteractionState() },
+    }));
+    try {
+      await vi.waitFor(() => expect(commitData).toHaveBeenCalledWith(polled,
+        { save: false, skipHistory: true, updateLastSavedSignature: true }));
+    } finally {
+      hook.unmount();
+    }
+  });
+
   it('does not adopt a remote update checked while the recovery draft banner is active', async () => {
     const provider: DataProvider = {
       loadTimeline: vi.fn(),

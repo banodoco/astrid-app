@@ -309,7 +309,8 @@ describe('ClipPanel transition controls (T11)', () => {
     expect(onChange).toHaveBeenCalledWith(
       expect.objectContaining({
         transition: expect.objectContaining({
-          type: 'crossfade',
+          // Lead ruling 21/22 Nov: any edit to a clip carrying a legacy R13 transition id writes the catalog id (Runtime/Agent strict catalog + R13 compatibility)
+          type: 'cross-fade',
           duration: 1.5,
         }),
       }),

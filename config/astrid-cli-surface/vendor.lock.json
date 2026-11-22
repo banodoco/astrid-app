@@ -32,5 +32,5 @@
   "manifest": "artifacts.json",
   "producer": "astrid-agent",
   "producer_version": "sha256:cc4a6a1e91a7d616ec8f3d32f08cc0da5682db3c676f4d6bb4fe85cce28a9ff5",
-  "source_commit": "caafac7841496c7baed61f309d0ba55d55ca9af7"
+  "source_commit": "e3aaa8c2fd0b25b48a550b764885c903e4f204f2"
 }

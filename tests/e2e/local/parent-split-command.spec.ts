@@ -26,7 +26,8 @@ async function seedSplit(harness: DirectHarness): Promise<SplitSeed> {
   const publication = compositionPublication({ projectId: harness.seed.projectId, timelineId }, null, 'Native parent split', 30);
   const parent = publication.parent_composition as Record<string, any>; parent.config.output.fps = { numerator: 30000, denominator: 1001 };
   parent.config.clips = [clip, neighbor]; parent.clips = [clip, neighbor]; parent.config.opaque = { root: 'preserve', child: [null, false, 0] };
-  parent.registry = { assets: { 'split-video': { file: harness.seed.video.mediaType === 'video/webm' ? 'split-video.webm' : 'split-video.mp4', type: harness.seed.video.mediaType, duration: 12, media_id: harness.seed.video.objectId, content_sha256: harness.seed.video.digest } } };
+  // REVIEW: Agent 86031e920 strict registry validation requires bare lowercase SHA-256; preserve the tagged media ID.
+  parent.registry = { assets: { 'split-video': { file: harness.seed.video.mediaType === 'video/webm' ? 'split-video.webm' : 'split-video.mp4', type: harness.seed.video.mediaType, duration: 12, media_id: harness.seed.video.objectId, content_sha256: harness.seed.video.digest.replace(/^sha256:/, '') } } };
   const result = await harness.runtimeJson('POST', `/v1/projects/${harness.seed.projectId}/timelines/${timelineId}/composition-revisions`, publication);
   expect(result.status, JSON.stringify(result.body)).toBe(200);
   const project = await harness.runtimeJson('GET', `/v1/projects/${harness.seed.projectId}`);

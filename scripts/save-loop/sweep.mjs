@@ -3,8 +3,8 @@
  * isolated SL-1 stack. Each descriptor is measured three times; its cleanup is
  * required so a later row does not inherit an earlier row's edits.
  *
- * SAVE_LOOP_CHROME=/usr/bin/google-chrome \
- * SAVE_LOOP_PLAYWRIGHT=/opt/node-tools/node_modules/playwright/index.mjs \
+ * SAVE_LOOP_CHROME=/absolute/path/to/chrome \
+ * SAVE_LOOP_PLAYWRIGHT=/absolute/path/to/node_modules/playwright/index.mjs \
  * SAVE_LOOP_BASE_URL=http://127.0.0.1:PORT \
  * node scripts/save-loop/sweep.mjs --manifest /path/to/manifest.json \
  *   --results /path/to/round.jsonl --versions /path/to/versions.json

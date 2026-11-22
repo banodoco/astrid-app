@@ -191,17 +191,30 @@ scripts/save-loop/quick-backup-cycle.sh backup empty \
 ```
 
 Repeat with `10` and `100` and distinct realm, manifest and bundle paths.
-For the heavy row, pass the exact approved restored source
-`/home/user/codex-run/run/evidence/plan-77/growth-profile/v30-owned-synthetic-restored-realm`
-as the realm argument, and a fresh support-root path under the dedicated
-`<tooling-checkout>.env/quick-indicator/support` parent. Keep that marker-owned
-support directory at the same path across stack cleanup and both restores;
-Runtime manages its authentication material. The
-command verifies its receipt and database SHA-256, refuses WAL/SHM sidecars,
-copies it into marker-owned staging, then uses the installed Runtime's normal
-backup command. It never reads the missing old authentication key or changes
-the source. Runtime's normal restore verifies each per-run copy. Supply the
-verified v30 fixture manifest.
+For the heavy row, supply a canonical approved restore receipt path, the
+independently approved exact realm UUID and database SHA-256, and the receipt's
+canonical destination as `REALM_ROOT`. Do not derive the expected UUID or hash
+from the receipt being checked. The helper requires the receipt destination
+and source root to match exactly, checks both receipt identity fields and the
+source database digest, rejects SQLite sidecars and key files, then copies the
+realm into marker-owned staging. It checks for sidecars and keys again and
+checks the database digest in the source and staging after the copy. Runtime's
+normal backup must report that same realm UUID, and its backup manifest must
+match. Large mode also requires the synthetic 300-clip v30 manifest shape used
+by the compiled recorder, including the exact primary fixture clip/track and
+10 shot occurrences. Runtime manages its authentication material.
+
+The large-row backup call takes three additional explicit custody arguments
+after `NEW_BUNDLE`:
+
+```sh
+scripts/save-loop/quick-backup-cycle.sh backup large \
+  "$STACK_ROOT" "$REALM_ROOT" "$SUPPORT_ROOT" "$V30_MANIFEST" "$NEW_BUNDLE" \
+  "$APPROVED_RESTORE_RECEIPT" "$EXPECTED_REALM_UUID" "$EXPECTED_DB_SHA256"
+```
+
+Keep the marker-owned support directory at the same path across stack cleanup
+and both restores. Runtime's normal restore verifies each per-run backup copy.
 
 For each bundle, call `restore-run` with a new owned stack root and result
 paths. The Runtime restore destination and adopted data root are generated
@@ -215,7 +228,7 @@ scripts/save-loop/quick-backup-cycle.sh restore-run empty \
   /absolute/tooling-checkout.env/quick-indicator/bundles/empty/versions.json \
   /absolute/tooling-checkout.env/quick-indicator/new-stack \
   /absolute/tooling-checkout.env/quick-indicator/new-stack/source-manifest.json \
-  /home/user/codex-run/wt/astrid-app-p77-quick-baseline-product \
+  /absolute/path/to/clean/product-app \
   /absolute/tooling-checkout.env/quick-indicator/new-stack/results-empty /absolute/tooling-checkout.env/quick-indicator/new-stack/startup-empty.json
 ```
 

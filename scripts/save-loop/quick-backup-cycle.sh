@@ -8,7 +8,8 @@ SANDBOX="${APP}.env/quick-indicator"
 readonly APP SANDBOX
 fail() { echo "STOP: $*" >&2; exit 1; }
 usage='Usage:
-  quick-backup-cycle.sh backup SIZE STACK_ROOT REALM_ROOT SUPPORT_ROOT MANIFEST NEW_BUNDLE
+  quick-backup-cycle.sh backup empty|10|100 STACK_ROOT REALM_ROOT SUPPORT_ROOT MANIFEST NEW_BUNDLE
+  quick-backup-cycle.sh backup large STACK_ROOT REALM_ROOT SUPPORT_ROOT MANIFEST NEW_BUNDLE APPROVED_RESTORE_RECEIPT EXPECTED_REALM_UUID EXPECTED_DB_SHA256
   quick-backup-cycle.sh restore-run SIZE BUNDLE EXPECTED_VERSIONS STACK_ROOT SOURCE_MANIFEST PRODUCT_APP NEW_RESULTS NEW_STARTUP
 
 SIZE is empty, 10, 100, or large. All generated paths must be new paths inside
@@ -93,8 +94,37 @@ size="${1:-}"; shift || true
 case "$size" in empty|10|100|large) ;; *) fail 'size must be empty, 10, 100, or large';; esac
 
 if [[ "$mode" == backup ]]; then
-  [[ $# == 5 ]] || fail "$usage"
+  [[ ( "$size" == large && $# == 8 ) || ( "$size" != large && $# == 5 ) ]] || fail "$usage"
   stack="$(owned_stack "$1")"; realm="$(canonical "$2")"; support="$(canonical "$3")"; manifest="$(canonical "$4")"; bundle="$(fresh_dir "$5")"
+  expected_realm_id=''; expected_db_sha256=''
+  if [[ "$size" == large ]]; then
+    receipt="$(canonical "$6")"; expected_realm_id="$7"; expected_db_sha256="$8"
+    [[ -f "$receipt" && ! -L "$receipt" ]] || fail 'approved restore receipt must be an existing canonical regular file'
+    [[ "$expected_realm_id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || fail 'expected realm UUID must be an explicit lowercase UUID'
+    [[ "$expected_db_sha256" =~ ^[0-9a-f]{64}$ ]] || fail 'expected database SHA-256 must be explicit lowercase hexadecimal'
+    [[ -d "$realm" && ! -L "$realm" && "$(realpath -- "$realm")" == "$realm" ]] || fail 'large source realm must be an existing canonical owned realm directory'
+    [[ -f "$realm/realm.sqlite3" && ! -L "$realm/realm.sqlite3" && ! -e "$realm/realm.sqlite3-wal" && ! -e "$realm/realm.sqlite3-shm" ]] || fail 'v30 source is incomplete or has SQLite sidecars'
+    [[ -z "$(find "$realm" \( -type f -o -type l \) \( -iname '*auth*key*' -o -iname '*.key' \) -print -quit)" ]] || fail 'v30 source contains a key file; refusing to copy it'
+    node - "$receipt" "$realm" "$expected_realm_id" "$expected_db_sha256" <<'NODE' || fail 'approved v30 restore receipt or source database does not match explicit custody values'
+const fs=require('node:fs'),crypto=require('node:crypto');
+const [receiptFile,realm,expectedRealm,expectedSha]=process.argv.slice(2);
+const r=JSON.parse(fs.readFileSync(receiptFile,'utf8'));
+const db=realm+'/realm.sqlite3';
+const sha=crypto.createHash('sha256').update(fs.readFileSync(db)).digest('hex');
+if(r.destination!==realm||r.realm_id!==expectedRealm||
+   r.verification?.database_sha256!==expectedSha||sha!==expectedSha) process.exit(1);
+NODE
+    node - "$manifest" <<'NODE' || fail 'large source manifest is not the exact approved synthetic v30 fixture shape'
+const fs=require('node:fs');const m=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+const primary=m.clips?.video?.primary;
+if(m.media?.synthetic!==true||m.measurement?.clip_count!==300||m.live_proof?.restored_version!==30||
+   typeof m.project_id!=='string'||!m.project_id||typeof m.timeline_id!=='string'||!m.timeline_id||
+   primary?.clip_id!=='fixture-video-0154'||primary?.track_id!=='V6'||
+   m.clips?.shot_occurrences?.length!==10||
+   !Array.isArray(m.tracks?.visual)||!Array.isArray(m.tracks?.audio)||
+   m.tracks.visual.length+m.tracks.audio.length!==9) process.exit(1);
+NODE
+  fi
   support_parent="$SANDBOX/support"
   if [[ ! -e "$support_parent" ]]; then mkdir -m 700 "$support_parent"; printf 'p77-quick-support-parent-v1 %s' "$support_parent" >"$support_parent/.p77-quick-support-parent-owned"; fi
   [[ -d "$support_parent" && ! -L "$support_parent" && "$(realpath -- "$support_parent")" == "$support_parent" && -f "$support_parent/.p77-quick-support-parent-owned" && "$(cat "$support_parent/.p77-quick-support-parent-owned")" == "p77-quick-support-parent-v1 $support_parent" ]] || fail 'support parent must be canonical and marker-owned'
@@ -106,21 +136,15 @@ if [[ "$mode" == backup ]]; then
   mkdir -p "$(dirname -- "$bundle")"; mkdir -m 700 "$bundle"
   backup_root="$realm"
   if [[ "$size" == large ]]; then
-    approved='/home/user/codex-run/run/evidence/plan-77/growth-profile/v30-owned-synthetic-restored-realm'
-    receipt='/home/user/codex-run/run/evidence/plan-77/growth-profile/v30-restore-receipt.json'
-    [[ "$realm" == "$approved" && -d "$approved" && ! -L "$approved" ]] || fail "large source must be the exact approved restored v30 realm: $approved"
-    [[ -f "$receipt" && -f "$realm/realm.sqlite3" && ! -e "$realm/realm.sqlite3-wal" && ! -e "$realm/realm.sqlite3-shm" ]] || fail 'approved v30 source is incomplete or has SQLite sidecars'
-    [[ -z "$(find "$realm" -type f \( -iname '*auth*key*' -o -iname '*.key' \) -print -quit)" ]] || fail 'v30 source contains a key file; refusing to copy it'
-    node - "$receipt" "$realm/realm.sqlite3" <<'NODE' || fail 'approved v30 realm receipt or database digest does not match'
-const fs=require('node:fs'),crypto=require('node:crypto');const r=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
-const hash=crypto.createHash('sha256').update(fs.readFileSync(process.argv[3])).digest('hex');
-if(r.destination!=='/home/user/codex-run/run/evidence/plan-77/growth-profile/v30-owned-synthetic-restored-realm'||r.realm_id!=='201c0486-58d8-4d23-b05d-9220c1762120'||r.verification?.database_sha256!=='c0b27bb02c33d5b1e72699749c07adc769dda0c0eb2ceaceab222b630c6e132d'||hash!==r.verification.database_sha256) process.exit(1);
-NODE
     backup_root="$stack/quick-v30-source"
     [[ ! -e "$backup_root" && ! -L "$backup_root" ]] || fail 'owned v30 staging path already exists'
     mkdir -m 700 "$backup_root"; cp -a -- "$realm/." "$backup_root/"
     printf 'p77-quick-v30-staging-v1 %s\n' "$backup_root" >"$backup_root/.p77-quick-staging-owned"; chmod 600 "$backup_root/.p77-quick-staging-owned"
-    [[ "$(sha256sum "$backup_root/realm.sqlite3" | awk '{print $1}')" == c0b27bb02c33d5b1e72699749c07adc769dda0c0eb2ceaceab222b630c6e132d && ! -e "$backup_root/realm.sqlite3-wal" && ! -e "$backup_root/realm.sqlite3-shm" ]] || fail 'v30 staging copy did not verify cleanly'
+    [[ -f "$backup_root/realm.sqlite3" && ! -L "$backup_root/realm.sqlite3" && ! -e "$backup_root/realm.sqlite3-wal" && ! -e "$backup_root/realm.sqlite3-shm" ]] || fail 'v30 staging copy is incomplete or has SQLite sidecars'
+    [[ -z "$(find "$backup_root" \( -type f -o -type l \) \( -iname '*auth*key*' -o -iname '*.key' \) -print -quit)" ]] || fail 'v30 staging copy contains a key file; refusing backup'
+    [[ ! -e "$realm/realm.sqlite3-wal" && ! -e "$realm/realm.sqlite3-shm" ]] || fail 'v30 source acquired SQLite sidecars during staging'
+    [[ -z "$(find "$realm" \( -type f -o -type l \) \( -iname '*auth*key*' -o -iname '*.key' \) -print -quit)" ]] || fail 'v30 source acquired a key file during staging'
+    [[ "$(sha256sum "$backup_root/realm.sqlite3" | awk '{print $1}')" == "$expected_db_sha256" && "$(sha256sum "$realm/realm.sqlite3" | awk '{print $1}')" == "$expected_db_sha256" ]] || fail 'source or staging database digest changed during staging'
   fi
   if [[ ! -e "$support" ]]; then mkdir -m 700 "$support"; fi
   [[ -d "$support" && ! -L "$support" ]] || fail 'support root must be an owned directory'
@@ -134,7 +158,7 @@ NODE
   "${runtime_env[@]}" "$cli" down --profile astrid --data-root "$stack/data" --json >"$bundle/down.json" 2>"$bundle/down.stderr" || fail 'owned Runtime stop failed; bundle retained for inspection'
   "${runtime_env[@]}" "$backup_cli" backup --root "$backup_root" --support-root "$support" --destination "$bundle/backup" >"$bundle/backup.json" 2>"$bundle/backup.stderr" || fail 'Runtime protocol backup failed; bundle retained'
   backup_realm_id="$(node -e 'const x=require(process.argv[1]);const id=x.manifest?.realm?.id;if(typeof id!=="string"||!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id))process.exit(1);process.stdout.write(id)' "$bundle/backup.json")" || fail 'verified backup did not report a valid manifest realm ID'
-  [[ "$size" != large || "$backup_realm_id" == 201c0486-58d8-4d23-b05d-9220c1762120 ]] || fail 'backup realm does not match approved v30 ownership receipt'
+  [[ "$size" != large || "$backup_realm_id" == "$expected_realm_id" ]] || fail 'backup realm does not match the explicit v30 custody UUID'
   node - "$bundle/backup/manifest.json" "$backup_realm_id" <<'NODE' || fail 'published backup manifest realm does not match verified receipt'
 const fs=require('node:fs');const manifest=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
 if(manifest.realm?.id!==process.argv[3])process.exit(1);

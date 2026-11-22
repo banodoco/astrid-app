@@ -25,10 +25,15 @@ check this floor. The fixture may take substantial time and space.
 
 This is an explicit, executable full-run command, not a status or dry-run
 command. It creates a local isolated Runtime and editor, installs from the
-committed pins, creates synthetic media and timelines, opens Chrome, and writes
-only under its new run directory. The build can fail its clip, document-size or
-timing target checks before Chrome starts. The generated fixture uses no owner
-media and no GPU. Do not point these tools at a hosted or owner workspace.
+committed pins, creates synthetic media and timelines, and opens Chrome. Its
+outputs go under the new run directory, but `npm ci` runs in the App checkout
+and replaces that checkout's `node_modules`; use a disposable committed App
+checkout, not an active development checkout. Chrome uses a temporary
+`/tmp/sl-*` profile that normal browser cleanup removes; forced termination may
+leave that temporary directory behind. The build can fail its clip,
+document-size or timing target checks before Chrome starts. The generated
+fixture uses no owner media and no GPU. Do not point these tools at a hosted or
+owner workspace.
 
 The older `scripts/save-loop/start-isolated-linux.sh` remains available for a
 foreground isolated stack. It uses `SL1_SCRATCH` and replaces only its own
@@ -156,10 +161,10 @@ SAVE_LOOP_ROOT=/absolute/run/stack \
 SAVE_LOOP_BASE_URL=http://127.0.0.1:2400 \
 SAVE_LOOP_CHROME=/absolute/path/to/chrome \
 SAVE_LOOP_PLAYWRIGHT=/absolute/app/node_modules/playwright/index.mjs \
-SAVE_LOOP_RESULTS=/absolute/run/reduced/results.jsonl \
+SAVE_LOOP_RESULTS=/absolute/run/reduced-results.jsonl \
 node scripts/save-loop/sweep.mjs \
   --manifest /absolute/run/fixture/manifest-PROJECT.json \
-  --results /absolute/run/reduced/results.jsonl \
+  --results /absolute/run/reduced-results.jsonl \
   --versions /absolute/run/versions.json \
   --reduced-opening
 ```
@@ -172,10 +177,12 @@ does not itself run that one-clip control. It requires an already-running
 isolated stack and does not create or restore a fixture.
 
 The recorded Round 4 and Round 5 reduced observations used a restored partial
-fixture with 300 root clips, not the standard 616-root shape. Their first
-complete post-open metadata reads under one second arrived 152.779 seconds and
-205.452 seconds after the provisional UI marker, respectively. The full
-85-scenario matrix has not completed: repeated guarded cleanup replays history
-and prevented it from finishing. No warm gesture-to-Saved result was
-established. These rounds do not qualify the standard fixture, a warm save
-target, or a cross-platform run.
+fixture with 300 root clips, not the standard 616-root shape. The 152.779-second
+Round 4 availability result came from a corrected same-Runtime continuation
+with a fresh browser profile; the original fresh Round 4 stopped before a valid
+availability result or gesture. The 205.452-second Round 5 result came from a
+fresh run. Those times are the first complete post-open metadata reads under
+one second after the provisional UI marker. The full 85-scenario matrix has not
+completed: repeated guarded cleanup replays history and prevented it from
+finishing. No warm gesture-to-Saved result was established. These rounds do
+not qualify the standard fixture, a warm save target, or a cross-platform run.

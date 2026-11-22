@@ -528,7 +528,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
               </p>}
             </div>
           </div>
-          <PublicAstridPlanet live={visible && !reducedMotion} />
+          <PublicAstridPlanet live={visible && !reducedMotion} contentReady={Boolean(content || error)} />
         </div>
       </section>
 

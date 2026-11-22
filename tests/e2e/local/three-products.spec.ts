@@ -3109,7 +3109,8 @@ nativeNoneTest('M2 native None bulk: one original-basis atomic clear preserves u
   expect(reloaded.pending).toEqual(retained.pending);
   expect(reloaded.intents).toEqual(retained.intents);
   // The single native owner is recovered automatically. Its rejected draft remains durable;
-  // rollback shows the Agent's canonical partial clear, and Save them reopens the refusal.
+  // rollback shows the Agent's canonical partial clear.
+  // REVIEW (#334, #345): R13 showed 'Save them' for this refused save. R14 reopens it with 'Try again'.
   const recovery = page.getByRole('alert').filter({ hasText: 'You have unsaved changes' });
   await expect(recovery).toBeVisible(CEILING);
   expect(await timelineDraft(page, seed3.timelineId)).toEqual(retainedDraft);
@@ -3118,7 +3119,7 @@ nativeNoneTest('M2 native None bulk: one original-basis atomic clear preserves u
     await page.getByRole('tab', { name: 'Effects', exact: true }).click();
     await expect(transitionSelect(page)).toContainText(id === seed3.appClipId ? 'None' : /cross[\s-]?fade/i);
   }
-  await recovery.getByRole('button', { name: 'Save them' }).click();
+  await recovery.getByRole('button', { name: 'Try again' }).click();
   await expect(page.getByRole('alertdialog', { name: CONFLICT_TITLE })).toBeVisible(CEILING);
   expect(await timelineDraft(page, seed3.timelineId)).toEqual(retainedDraft);
   const recoveredConflict = (await commandOutboxes(page, seed3.timelineId)).find((item) => item.ownerId === pending.ownerId)!;

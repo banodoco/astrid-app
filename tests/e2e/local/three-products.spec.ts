@@ -428,17 +428,37 @@ async function diagnoseRecovery(page: Page, name: string): Promise<void> {
           : /This timeline changed somewhere else/i.test(node.textContent ?? '') ? 'This timeline changed somewhere else' : '<other>',
         buttons: Array.from(node.querySelectorAll('button')).slice(0, 10).map((button) => {
           const text = button.textContent?.trim() ?? '';
-          return /^(Save them|Try again|Restore|Discard|Keep my changes|Use latest version)$/.test(text) ? text : '<other>';
+          const style = getComputedStyle(button); const rect = button.getBoundingClientRect();
+          return { label: /^(Save them|Try again|Restore|Discard|Keep my changes|Use latest version)$/.test(text) ? text : '<other>',
+            visible: rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none',
+            enabled: !button.disabled && button.getAttribute('aria-disabled') !== 'true' };
         }),
       })));
   } catch (error) { data.rolesError = error instanceof Error ? error.name : 'error'; }
   await attachDiagnostic(name, data);
+  // Screenshot a synthetic card built solely from the allowlisted JSON above; it contains no raw page content.
   try {
-    const alert = page.getByRole('alert').filter({ hasText: 'You have unsaved changes' }).first();
-    const screenshot = await alert.isVisible() ? await alert.screenshot({ timeout: 3000, mask: [alert] })
-      : await page.screenshot({ timeout: 3000, clip: { x: 0, y: 0, width: 320, height: 160 }, mask: [page.locator('body')] });
-    await test.info().attach(`${name}-redacted`, { body: screenshot, contentType: 'image/png' });
+    await page.evaluate((roles) => {
+      const card = document.createElement('div'); card.setAttribute('data-diag-recovery-card', 'true');
+      Object.assign(card.style, { position: 'fixed', top: '8px', left: '8px', zIndex: '2147483647',
+        background: '#fff', color: '#111', padding: '12px', width: '400px', font: '14px sans-serif' });
+      const heading = document.createElement('strong'); heading.textContent = 'Sanitized diagnostic: recovery/status'; card.appendChild(heading);
+      const rows = Array.isArray(roles) ? roles : [];
+      if (!rows.length) { const row = document.createElement('div'); row.textContent = 'No visible recovery/status roles'; card.appendChild(row); }
+      for (const item of rows) {
+        const row = document.createElement('div'); row.textContent = `${item.role}: ${item.text}`; card.appendChild(row);
+        for (const button of item.buttons) {
+          const line = document.createElement('div'); line.textContent = `  ${button.label} — visible: ${button.visible}, enabled: ${button.enabled}`; card.appendChild(line);
+        }
+      }
+      document.body.appendChild(card);
+    }, data.roles as any);
+    await test.info().attach(`${name}-sanitized-card`, {
+      body: await page.locator('[data-diag-recovery-card="true"]').screenshot({ timeout: 3000 }), contentType: 'image/png',
+    });
   } catch (error) { await attachDiagnostic(`${name}-screenshot`, { unavailable: error instanceof Error ? error.name : 'error' }); }
+  finally { try { await page.locator('[data-diag-recovery-card="true"]').evaluateAll((nodes) => nodes.forEach((node) => node.remove())); } catch { /* Page may have closed. */ } }
+
 }
 
 async function selectClip(page: Page, clipId: string) {

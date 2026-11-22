@@ -923,6 +923,44 @@ it('returns a playable locator for a freshly prepared object before registry rea
   });
 
 describe('verified basis loader diagnostics', () => {
+  it('serves a foreground history read between deferred pages', async () => {
+    const events: string[] = [];
+    const head = { revision_id: 'r2', publication_id: 'p2' };
+    const entries = [{ publication_id: 'p0' }, { publication_id: 'p1' }, { publication_id: 'p2' }];
+    let foreground!: Promise<unknown>;
+    let foregroundStarted!: () => void;
+    const started = new Promise<void>(resolve => { foregroundStarted = resolve; });
+    const fixture = runtimeFixture();
+    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: async (...args) => {
+      const [, path] = args;
+      if (!path.includes('/commits?')) return fixture.transport(...args);
+      const query = new URL(path, 'http://runtime.test').searchParams;
+      const cursor = query.get('cursor');
+      const limit = query.get('limit');
+      if (limit === '50') {
+        events.push('foreground');
+        return { status: 200, headers: {}, body: json({ head, items: entries, next_cursor: null }) };
+      }
+      if (!cursor) {
+        events.push('deferred-first');
+        // Queue an editor action before the deferred reader schedules its next-page yield.
+        setTimeout(() => {
+          foreground = provider.listTimelineCommits(TIMELINE_ID);
+          foregroundStarted();
+        }, 0);
+        return { status: 200, headers: {}, body: json({ head, items: entries.slice(0, 2), next_cursor: 'tail' }) };
+      }
+      events.push('deferred-tail');
+      return { status: 200, headers: {}, body: json({ head, items: entries.slice(2), next_cursor: null }) };
+    } });
+    const history = provider.loadTimelineCommandHistory(TIMELINE_ID, { revisionId: 'r2', publicationId: 'p2' });
+    await started;
+    await foreground;
+    expect(events).toEqual(['deferred-first', 'foreground']);
+    await expect(history).resolves.toEqual({ head, items: entries, next_cursor: null });
+    expect(events).toEqual(['deferred-first', 'foreground', 'deferred-tail']);
+  });
+
   it.each([
     ['history-head', 'history', /malformed timeline history head/],
     ['next-history-head', 'history', /malformed timeline history head/],

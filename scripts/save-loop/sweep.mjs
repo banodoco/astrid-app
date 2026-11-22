@@ -53,19 +53,20 @@ for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]]) {
 let failed = false;
 const rows = [];
 try {
-  const {b, p: page, context, cpu, opening} = await helpers.open({fixture:probeOnly ? undefined : fixture, onCleanup: close => { browser = {close}; }});
+  const {b, p: page, context, cpu, opening, startup} = await helpers.open({fixture:probeOnly ? undefined : fixture, onCleanup: close => { browser = {close}; }});
   browser = b;
   let secondPage;
-  const project = await page.evaluate(async projectId => {
+  const readStartup = (phase, operation) => startup ? startup.read(phase, operation) : operation();
+  const project = await readStartup('project', () => page.evaluate(async projectId => {
     const response = await fetch(`/api/runtime/v1/projects/${encodeURIComponent(projectId)}`, {credentials:'same-origin', cache:'no-store'});
     if (!response.ok) throw new Error(`sandbox project read failed (${response.status})`);
     const body = await response.json(); return body?.data ?? body;
-  }, fixture.project_id);
+  }, fixture.project_id));
   if (project.project_id !== fixture.project_id || project.metadata?.purpose !== 'synthetic Plan 77 save-loop fixture')
     throw new Error('project is not the synthetic Plan 77 sandbox fixture');
   fs.appendFileSync(resultsPath, JSON.stringify({type:'run', variant:fixture.variant || 'standard', date:new Date().toISOString(), versions, project_id:fixture.project_id, timeline_id:fixture.timeline_id, manifest:manifestPath}) + '\n');
   if (opening) {
-    const head = await publicSnapshot(page, baseUrl, fixture);
+    const head = await readStartup('head_after_ui', () => publicSnapshot(page, baseUrl, fixture));
     const idsMatch = sameIds(head.clipIds, expectedFixtureIds(fixture));
     opening.public_head = {project_id:head.project_id, timeline_id:head.timeline_id, revision:head.headRevision, publication:head.publicationId, exact_clip_ids:idsMatch};
     opening.full_ui_and_public_head_match = Boolean(opening.full_ui_saved && idsMatch && opening.head_before_ui.revision === head.headRevision && opening.head_before_ui.publication === head.publicationId);

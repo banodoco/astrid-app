@@ -36,6 +36,39 @@ async function exitedWithin(proc, ms) {
     delay(ms).then(() => false),
   ]);
 }
+// One monotonic budget covers navigation and all read-only startup corroboration.
+export function startupBudget(onEvent = event => console.log(JSON.stringify(event))) {
+  const start = performance.now(), deadline = start + 480000;
+  const remaining = () => {
+    const ms = Math.floor(deadline - performance.now());
+    if (ms <= 0) throw new Error('startup readiness deadline exceeded');
+    return ms;
+  };
+  const bounded = async (phase, operation) => {
+    const ms = remaining();
+    let timer;
+    try {
+      return await Promise.race([operation(), new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`startup readiness deadline exceeded during ${phase}`)), ms);
+      })]);
+    } finally { clearTimeout(timer); }
+  };
+  const read = async (phase, operation) => {
+    for (;;) {
+      try { return await bounded(phase, operation); }
+      catch (error) {
+        const message = String(error?.message || error);
+        const kind = /(?:^|\s)TypeError: Failed to fetch(?:\s|$)/.test(message) ? 'fetch'
+          : /^(?:public timeline metadata|public composition revision|public composition revision index) GET failed \((502|503|504)\)$/.exec(message)?.[1]
+          || /^(?:page\.evaluate: )?(?:Error: )?sandbox project read failed \((502|503|504)\)(?:\n|$)/.exec(message)?.[1];
+        if (!kind) throw error;
+        onEvent({type:'startup_retry', phase, class:kind === 'fetch' ? kind : `http_${kind}`, elapsed_ms:Math.round(performance.now()-start)});
+        await bounded(phase, () => delay(Math.min(1000, remaining())));
+      }
+    }
+  };
+  return {start, remaining, bounded, read};
+}
 export async function open({onCleanup, fixture, onOpening} = {}){
   checkDisk();
   const browserScratch=fs.mkdtempSync(path.join('/tmp','sl-'));
@@ -80,7 +113,7 @@ export async function open({onCleanup, fixture, onOpening} = {}){
     const ev=[]; p.__ev=ev;
     p.on('request',r=>{ if(r.method()==='POST'&&!/handshake|local-update|inspect|acp|chat/.test(r.url())) r.__t=Date.now(); });
     p.on('response',async r=>{ const q=r.request(); if(q.method()==='POST'&&!/handshake|local-update|inspect|acp|chat/.test(r.url())){ let body=''; if(/commit/.test(r.url())){try{body=(await r.text()).slice(0,400)}catch{}} ev.push({t:Date.now(),requestTime:q.__t,url:r.url().replace(/.*\/api\//,''),status:r.status(),body}); }});
-    let opening;
+    let opening, startup;
     if (fixture) {
       const expected = expectedFixtureIds(fixture);
       const tracks = [...(fixture.tracks?.visual ?? []), ...(fixture.tracks?.audio ?? [])].map(t=>t.id);
@@ -89,11 +122,12 @@ export async function open({onCleanup, fixture, onOpening} = {}){
       if (!target?.clip_id || !target?.track_id) throw new Error('fixture lacks a selection target');
       if (!process.env.SAVE_LOOP_ROOT) throw new Error('SAVE_LOOP_ROOT required for owned Runtime CPU identity');
       cpu = createCpuSampler(runtimeRoot(process.env.SAVE_LOOP_ROOT), processRoot(proc.pid));
-      const cpuStart=cpu.mark(), start=performance.now();
+      startup=startupBudget();
+      const cpuStart=cpu.mark(), start=startup.start;
       const posts=[];
       const observe=request=>{if(request.method()==='POST' && request.url().includes('/api/runtime/')) posts.push(request.url().replace(/.*\/api\//,''));};
       p.on('request',observe);
-      const navigation=p.goto(URL_, {waitUntil:'domcontentloaded'});
+      const navigation=p.goto(URL_, {waitUntil:'domcontentloaded', timeout:startup.remaining()});
       const selector=`.clip-action[data-clip-id="${target.clip_id}"][data-row-id="${target.track_id}"]`;
       const first15=(async()=>{
         try {
@@ -117,21 +151,21 @@ export async function open({onCleanup, fixture, onOpening} = {}){
             };
             const actions=[...document.querySelectorAll('.clip-action[data-clip-id][data-row-id]')];
             return expectedIds.every(id=>actions.some(e=>e.getAttribute('data-clip-id')===id && visible(e)));
-          },{expectedIds:ids,project:fixture.project_id,timeline:fixture.timeline_id},{timeout:300000});
+          },{expectedIds:ids,project:fixture.project_id,timeline:fixture.timeline_id},{timeout:startup.remaining()});
           return {visible_ms:performance.now()-start, expected_ids:ids, limitation:'All expected first-15-second clips intersect the visible viewport; editability and complete time-axis coverage are not proven.'};
         } catch(error) {return {visible_ms:null,error:String(error.message),limitation:'First-15-second clip visibility not proven.'};}
       })();
       const selection=(async()=>{
         try {
           const control=p.locator(selector).first();
-          await control.waitFor({state:'visible', timeout:300000});
+          await control.waitFor({state:'visible', timeout:startup.remaining()});
           const current=new URL(p.url());
           if (current.searchParams.get('project')!==fixture.project_id || current.searchParams.get('timeline')!==fixture.timeline_id) throw new Error('selection target is not on the fixture project and timeline');
           const visible=performance.now()-start;
           const selectedBefore=await control.getAttribute('data-selected');
           const countBefore=posts.length;
-          await control.press('Enter');
-          await p.waitForFunction(sel=>document.querySelector(sel)?.getAttribute('data-selected')==='true',selector,{timeout:10000});
+          await control.press('Enter', {timeout:startup.remaining()});
+          await p.waitForFunction(sel=>document.querySelector(sel)?.getAttribute('data-selected')==='true',selector,{timeout:Math.min(10000, startup.remaining())});
           return {visible_ms:visible, selection_ms:performance.now()-start, selected_before:selectedBefore, selection_transition_proven:selectedBefore !== 'true', runtime_posts_during_selection:posts.length-countBefore, limitation:'Selection only; first 15 seconds rendered, editable state, and unchanged public head are not established.'};
         } catch(error) {return {selection_ms:null, error:String(error.message), limitation:'Selection and first 15 seconds editable are not established.'};}
       })();
@@ -142,40 +176,56 @@ export async function open({onCleanup, fixture, onOpening} = {}){
           const handle=await p.waitForFunction(first15WritableCondition, {
             expectedIds:first15FixtureIds(fixture), project:fixture.project_id, timeline:fixture.timeline_id,
             targetClipId:target.clip_id, targetTrackId:target.track_id,
-          }, {timeout:300000});
+          }, {timeout:startup.remaining()});
           const evidence=await handle.jsonValue();
           const ms=performance.now()-start;
           await handle.dispose();
           return {ms,target_pass:ms<=5000,evidence, label:'First-15 clip visibility, responded-to selection, and writable track-name affordance; no edit was made.', limitation:'A writable affordance and the shared editability policy do not prove that a persisted edit was accepted or that every clip is editable.'};
         } catch(error) {return {ms:null,target_pass:null,reason:String(error.message)};}
       })();
+      firstUsable.then(value => console.log(JSON.stringify({type:'startup_first_usable_observation', ms:value.ms, target_pass:value.target_pass, corroborated:false})));
       await navigation;
+      // Observe the same stable predicate independently while public reads may stall.
+      // It is explicitly uncorroborated; the original post-head observer remains below.
+      const earlyFull=(async()=>{
+        let stableSince=null;
+        while (performance.now()-start < 480000) {
+          const state=await startup.bounded('early_ui', () => p.evaluate(()=>({project:new URL(location.href).searchParams.get('project'), timeline:new URL(location.href).searchParams.get('timeline'), ids:[...document.querySelectorAll('.clip-action[data-clip-id][data-row-id]')].map(e=>e.getAttribute('data-clip-id')), tracks:[...new Set([...document.querySelectorAll('[data-row-id]')].map(e=>e.getAttribute('data-row-id')))], saved:[...document.querySelectorAll('div,span,button')].some(e=>e.children.length===0&&/^saved$/i.test((e.textContent||'').trim()))})));
+          const matches=state.project===fixture.project_id && state.timeline===fixture.timeline_id && state.saved && sameIds(state.ids,expected) && sameIds(state.tracks,tracks);
+          if (matches) {
+            stableSince ??= performance.now();
+            if (performance.now()-stableSince>=800) return {ui_saved_ms:performance.now()-start, stable_ms:performance.now()-stableSince, corroborated:false};
+          } else stableSince=null;
+          await startup.bounded('early_ui', () => delay(Math.min(250, startup.remaining())));
+        }
+        return null;
+      })().then(value => { console.log(JSON.stringify({type:'startup_ui_observation', full_ui_saved:value, corroborated:false})); return value; }, () => { console.log(JSON.stringify({type:'startup_ui_observation', full_ui_saved:null, corroborated:false})); return null; });
       const {publicSnapshot} = await import('./assert.mjs');
-      const headBefore = await publicSnapshot(p, process.env.SAVE_LOOP_BASE_URL, fixture);
+      const headBefore = await startup.read('head_before_ui', () => publicSnapshot(p, process.env.SAVE_LOOP_BASE_URL, fixture));
       if (!sameIds(headBefore.clipIds, expected)) throw new Error('opening public head clip IDs do not match fixture');
       let full=null;
-      const deadline=performance.now()+300000;
+      const deadline=start+480000;
       let stableSince=null;
       while(performance.now()<deadline) {
-        const state=await p.evaluate(()=>({project:new URL(location.href).searchParams.get('project'), timeline:new URL(location.href).searchParams.get('timeline'), ids:[...document.querySelectorAll('.clip-action[data-clip-id][data-row-id]')].map(e=>e.getAttribute('data-clip-id')), tracks:[...new Set([...document.querySelectorAll('[data-row-id]')].map(e=>e.getAttribute('data-row-id')))], saved:[...document.querySelectorAll('div,span,button')].some(e=>e.children.length===0&&/^saved$/i.test((e.textContent||'').trim()))}));
+        const state=await startup.bounded('full_ui', () => p.evaluate(()=>({project:new URL(location.href).searchParams.get('project'), timeline:new URL(location.href).searchParams.get('timeline'), ids:[...document.querySelectorAll('.clip-action[data-clip-id][data-row-id]')].map(e=>e.getAttribute('data-clip-id')), tracks:[...new Set([...document.querySelectorAll('[data-row-id]')].map(e=>e.getAttribute('data-row-id')))], saved:[...document.querySelectorAll('div,span,button')].some(e=>e.children.length===0&&/^saved$/i.test((e.textContent||'').trim()))})));
         const matches=state.project===fixture.project_id && state.timeline===fixture.timeline_id && state.saved && sameIds(state.ids,expected) && sameIds(state.tracks,tracks);
         if (matches) {
           stableSince ??= performance.now();
           if (performance.now()-stableSince>=800) {full={ui_saved_ms:performance.now()-start,stable_ms:performance.now()-stableSince,cpu:cpu.delta(cpuStart,'opening_to_full_ui_saved')}; break;}
         } else stableSince=null;
-        await p.waitForTimeout(250);
+        await startup.bounded('full_ui', () => p.waitForTimeout(Math.min(250, startup.remaining())));
       }
       if (!full) opening = {cpu:cpu.delta(cpuStart,'opening_until_full_ui_timeout')};
       const [selected,first15Visible,usable]=await Promise.all([selection,first15,firstUsable]);
       p.off('request',observe);
-      opening={type:'opening', selection:selected, first_15_seconds_visibility:first15Visible, first_usable:usable, first_usable_ms:usable.ms, first_usable_target_pass:usable.target_pass, full_ui_saved:full, head_before_ui:{revision:headBefore.headRevision,publication:headBefore.publicationId}, timeout_cpu:opening?.cpu ?? null, limitation:full ? 'Public head identity and exact IDs must be confirmed before this is a full-open claim.' : 'Full UI was not proven; the timeline may virtualize offscreen controls.', target_first_usable_ms:5000,target_full_open_ms:15000};
+      opening={type:'opening', early_full_ui_saved:await earlyFull, selection:selected, first_15_seconds_visibility:first15Visible, first_usable:usable, first_usable_ms:usable.ms, first_usable_target_pass:usable.target_pass, full_ui_saved:full, head_before_ui:{revision:headBefore.headRevision,publication:headBefore.publicationId}, timeout_cpu:opening?.cpu ?? null, limitation:full ? 'Public head identity and exact IDs must be confirmed before this is a full-open claim.' : 'Full UI was not proven; the timeline may virtualize offscreen controls.', target_first_usable_ms:5000,target_full_open_ms:15000};
     } else {
       await p.goto(URL_);
       await p.waitForFunction(()=>[...document.querySelectorAll('div')].some(e=>e.children.length===0&&/^saved$/i.test(e.textContent||'')),null,{timeout:60000});
     }
     await p.waitForTimeout(15000);
     if (opening) { opening.stability_delay_ms=15000; if (onOpening) onOpening(opening); }
-    return {b:{close},p,ev,context:ctx,cpu,opening};
+    return {b:{close},p,ev,context:ctx,cpu,opening,startup:fixture ? startup : undefined};
   } catch(error) {
     try { await close(); }
     catch(cleanupError) {

@@ -2088,6 +2088,10 @@ describe('useTimelineSave with deferred Runtime history', () => {
         publisher: n === 2 ? 'agent' : scope.actorId,
         provider_version: response.data.provider_version, compiler_version: response.data.compiler_version,
       }));
+      const olderEntries: HistoryEntry[] = [-2, -1].map(n => ({
+        ...historyEntries[0], ...pin(n), previous: n === -2 ? null : pin(-2),
+      }));
+      const deferredEntries = [...olderEntries, { ...historyEntries[0], previous: pin(-1) }, ...historyEntries.slice(1, 3)];
       let current = 2;
       let releaseHistory!: () => void;
       const historyGate = new Promise<void>(resolve => { releaseHistory = resolve; });
@@ -2100,18 +2104,20 @@ describe('useTimelineSave with deferred Runtime history', () => {
           const query = new URL(path, 'http://runtime.test').searchParams;
           reads.push(query.toString());
           if (query.get('limit') === '1') {
-            value = { head: pin(current), items: historyEntries.slice(0, 1), next_cursor: 'oldest' };
+            value = { head: pin(current), items: deferredEntries.slice(0, 1), next_cursor: 'oldest' };
+          } else if (query.get('cursor') === 'full-middle') {
+            value = { head: pin(2), items: deferredEntries.slice(2, 4), next_cursor: 'full-tail' };
           } else if (query.get('cursor') === 'full-tail') {
             await historyGate;
             if (outcome === 'history unavailable') {
               return { status: 503, headers: {}, body: json({ code: 'unavailable', message: 'History unavailable' }) };
             }
-            value = { head: pin(2), items: historyEntries.slice(2, 3), next_cursor: null };
+            value = { head: pin(2), items: deferredEntries.slice(4, 5), next_cursor: null };
           } else if (current === 2) {
             expect(query.has('cursor')).toBe(false);
-            value = { head: pin(2), items: historyEntries.slice(0, 2), next_cursor: 'full-tail' };
+            value = { head: pin(2), items: deferredEntries.slice(0, 2), next_cursor: 'full-middle' };
           } else {
-            value = { head: pin(current), items: historyEntries, next_cursor: null };
+            value = { head: pin(current), items: [...deferredEntries, historyEntries[3]], next_cursor: null };
           }
         } else if (method === 'GET' && path.includes('/composition-revisions/')) {
           const revision = path.split('/').at(-1);
@@ -2140,7 +2146,7 @@ describe('useTimelineSave with deferred Runtime history', () => {
           getRecoverableIdentity: async () => scope,
         } });
       try {
-        await vi.waitFor(() => expect(reads).toEqual(['limit=1', 'r2', 'limit=50', 'limit=50&cursor=full-tail']));
+        await vi.waitFor(() => expect(reads).toEqual(['limit=1', 'r2', 'limit=2', 'limit=2&cursor=full-middle', 'limit=2&cursor=full-tail']));
         expect(harness.hook.result.current.timelineEditingReady).toBe(true);
         expect(harness.hook.result.current.history.canUndo).toBe(false);
         expect(harness.hook.result.current.history.canRedo).toBe(false);
@@ -2155,14 +2161,14 @@ describe('useTimelineSave with deferred Runtime history', () => {
           expect(posts).toHaveLength(1);
           expect(posts[0]).toMatchObject({ base_revision_id: 'r2', base_publication_id: 'p2' });
           expect(harness.hook.result.current.dataRef.current?.head?.headPublicationId).toBe('p3');
-          expect(reads.slice(4)).toEqual(['limit=50', 'r3']);
+          expect(reads.slice(5)).toEqual(['limit=50', 'r3']);
         }
 
         await act(async () => {
           releaseHistory();
           const read = readHistory.mock.results[0].value;
           if (outcome === 'history unavailable') await expect(read).rejects.toThrow('History unavailable');
-          else await read;
+          else await expect(read).resolves.toEqual({ head: pin(2), items: deferredEntries, next_cursor: null });
         });
         expect(harness.hook.result.current.timelineEditingReady).toBe(true);
         expect(harness.hook.result.current.history.canUndo).toBe(outcome === 'complete ancestry');

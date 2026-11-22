@@ -894,12 +894,12 @@ export class RuntimeDataProvider implements DataProvider {
   private async readTimelineHistory(
     timelineId: string,
     observe: ReturnType<typeof timelineBasisDiagnostics>,
-    options?: { headOnly?: boolean; expectedHead?: TimelineAcceptedIdentity },
+    options?: { headOnly?: boolean; expectedHead?: TimelineAcceptedIdentity; deferred?: boolean },
   ): Promise<{ head: HistoryPage['head']; history?: HistoryPage }> {
     const readPage = async (cursor?: string, captured?: HistoryPage['head']) => {
       const finish = observe('history');
       try {
-        const page = await this.listTimelineCommits(timelineId, cursor, options?.headOnly ? 1 : undefined);
+        const page = await this.listTimelineCommits(timelineId, cursor, options?.headOnly ? 1 : options?.deferred ? 2 : undefined);
         const head = page?.head;
         if (!head || typeof head.revision_id !== 'string' || !head.revision_id
           || typeof head.publication_id !== 'string' || !head.publication_id) {
@@ -933,6 +933,7 @@ export class RuntimeDataProvider implements DataProvider {
         throw new TimelineSchemaIncompatibleError('Workspace Runtime returned a cyclic timeline history cursor');
       }
       seenCursors.add(cursor);
+      if (options?.deferred) await new Promise<void>(resolve => setTimeout(resolve, 0));
       const next = await readPage(cursor, head);
       pages.push(next);
       cursor = next.next_cursor;
@@ -941,7 +942,7 @@ export class RuntimeDataProvider implements DataProvider {
   }
 
   async loadTimelineCommandHistory(timelineId: string, expectedHead: TimelineAcceptedIdentity): Promise<HistoryPage | undefined> {
-    const { history } = await this.readTimelineHistory(timelineId, timelineBasisDiagnostics(this), { expectedHead });
+    const { history } = await this.readTimelineHistory(timelineId, timelineBasisDiagnostics(this), { expectedHead, deferred: true });
     return history;
   }
 

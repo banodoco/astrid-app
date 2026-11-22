@@ -2237,8 +2237,10 @@
   content: "";
   position: absolute;
   z-index: -1;
-  inset: -260px -420px;
-  background: radial-gradient(ellipse 50% 50% at 50% 50%, color-mix(in srgb, var(--astrid-paper) 96%, transparent) 0%, color-mix(in srgb, var(--astrid-paper) 96%, transparent) 76%, color-mix(in srgb, var(--astrid-paper) 90%, transparent) 90%, transparent 100%);
+  inset: -42px -56px;
+  border-radius: 28px;
+  background: color-mix(in srgb, var(--astrid-paper) 96%, transparent);
+  filter: blur(28px);
   pointer-events: none;
 }
 .astrid-vision-hero-copy > .astrid-vision-hero-text { animation: none; }

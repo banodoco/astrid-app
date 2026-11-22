@@ -74,6 +74,18 @@ can reject activation after module evaluation. Neither stage sandboxes code
 that executes. The implementation is described in
 [`extensionLoader.ts`](../../src/tools/video-editor/runtime/extensionLoader.ts).
 
+## Project pack elements
+
+Effects and animations a project pack admits are loaded the same way in dev, built and hosted editors; no Vite route or DEV-only gate is involved.
+
+1. **Admit compiles.** `project-pack admit` bundles each admitted component into one ES module (react, react/jsx-runtime and remotion stay external) and records its bytes in the project-pack snapshot with `compiled: {path, sha256}`. A failed compile fails admission with the error.
+2. **Runtime lists and serves.** `GET /api/runtime/packs/project-elements?project=<id>` returns the project's currently admitted refs with each `digest`, `descriptor`, `authoring` and `url`, re-read on every request. `GET /api/runtime/packs/project-elements/<id>/<digest>.js` serves only bytes a current admission names, with no-store caching.
+3. **Editor imports by digest.** `admittedElementLoader.ts` fetches each listed bundle, checks its sha256 against the digest, and imports the verified bytes from a blob URL through the document import map (`extensionImportMap.ts`, injected in dev and build alike).
+4. **Refresh is event-driven.** The editor refreshes when the timeline's set of external element refs changes. `update-element` always changes the ref, so it refreshes too. No reload is needed after an admit.
+5. **A failed list does not block work.** A failed list, import or realm/project mismatch never rejects into agent prompts, editor mount or the element adapter. The readiness store records the reason (`phase: 'error'`) and logs it once; elements stay unloaded and the clip that needs one shows its placeholder with that reason.
+
+Shared fixture: `src/tools/video-editor/runtime/__fixtures__/project-elements-list.json` is byte-identical to the Runtime's `tests/fixtures/project-elements-list.json`; both sides assert against it.
+
 ## Manifest permissions and host services
 
 The manifest's `permissions` field is descriptive metadata for the author's
@@ -139,6 +151,8 @@ loader.
 
 ## Source references
 
+- [`admittedElementLoader.ts`](../../src/tools/video-editor/runtime/admittedElementLoader.ts) — project pack element list parsing, digest-verified import.
+- [`admitted-elements.ts`](../../src/tools/video-editor/runtime/admitted-elements.ts) — refresh, readiness and the frozen selection built from the Runtime list.
 - [`extensionLoader.ts`](../../src/tools/video-editor/runtime/extensionLoader.ts) — installed package pre-import checks, Runtime admission, import, and post-import export check.
 - [`extensionPackageManifest.ts`](../../src/tools/video-editor/runtime/extensionPackageManifest.ts) — direct and installed package manifest validation.
 - [`useExtensionLoaderWiring.ts`](../../src/tools/video-editor/runtime/useExtensionLoaderWiring.ts) — installed bundle-content carrier wiring.
@@ -152,4 +166,5 @@ loader.
 
 | Date | Change |
 |---|---|
+| 2026-11-18 | Documented project-pack element loading through the Runtime list and digest-verified import in every editor; a failed list records an error readiness instead of rejecting. |
 | 2026-11-02 | Replaced stale V1 claims with the shipped M4-09c installed-module admission and import behavior; documented that extension modules remain unsandboxed and distinguished the opaque-origin world preview iframe. |

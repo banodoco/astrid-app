@@ -1,5 +1,4 @@
 import fs from "fs";
-import {execFile} from "node:child_process";
 import { defineConfig, createLogger, type ProxyOptions } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
@@ -17,8 +16,6 @@ import {
   resolveAstridBridgeProxyPolicy,
 } from "./astridBridgeProxy";
 import { createRuntimeOperationAdmissionPlugin, createRuntimeOperationProxyOptions, createWorkspaceRuntimeProxyOptions, RUNTIME_TOKEN_FILE_ENV } from "./runtimeProxy";
-import {AstridRuntimeClient} from '../../src/integrations/runtime/client';
-import { createElementAdmissionsPlugin } from "./astridElementAdmissions";
 import { resolveAstridSource, validateAstridToolCatalog } from "./astridSource";
 import {
   createAstridGenerationComposer,
@@ -98,20 +95,6 @@ export default defineConfig(() => {
       "/runtime-config/v1/workspace.json": { target: runtimeTarget, changeOrigin: true },
     }
     : {};
-  const elementRuntime = runtimeTarget && runtimeToken ? new AstridRuntimeClient({baseUrl:runtimeTarget,token:runtimeToken,
-    expectedIdentity:{actorId:process.env.VITE_WORKSPACE_RUNTIME_EXPECTED_ACTOR_ID??'',realmId:process.env.VITE_WORKSPACE_RUNTIME_EXPECTED_REALM_ID??'',runtimeInstanceId:process.env.VITE_WORKSPACE_RUNTIME_EXPECTED_INSTANCE_ID??''}}):null;
-  const elementAdmissions = elementRuntime && process.env.ASTRID_ELEMENT_ARTIFACT_ROOT && process.env.ASTRID_PROJECT_PACKS_ROOT ? {
-    realmId:process.env.VITE_WORKSPACE_RUNTIME_EXPECTED_REALM_ID??'',artifactRoot:process.env.ASTRID_ELEMENT_ARTIFACT_ROOT,sourceRoot:process.env.ASTRID_PROJECT_PACKS_ROOT,
-    resolveRecord:async(projectId:string,ref:{packId:string;kind:string;id:string;revision:string}):Promise<Record<string,unknown>>=>{
-      const command=JSON.parse(process.env.ASTRID_ELEMENT_RESOLVE_COMMAND??'null') as string[]|null;
-      if(!Array.isArray(command)||!command.length||command.some(arg=>typeof arg!=='string'||!arg))throw new Error('ASTRID_ELEMENT_RESOLVE_COMMAND must configure the canonical native resolver argv');
-      return new Promise((resolve,reject)=>execFile(command[0],[...command.slice(1),'--realm',process.env.VITE_WORKSPACE_RUNTIME_EXPECTED_REALM_ID??'','--project',projectId,'--pack',ref.packId,'--element',ref.id,'--kind',ref.kind,'--revision',ref.revision],{timeout:60000,maxBuffer:2000000,env:process.env},(error,stdout,stderr)=>{
-        if(error){reject(new Error('Canonical element resolver failed: '+stderr.slice(-2048)));return;}
-        try{resolve(JSON.parse(stdout));}catch(parseError){reject(parseError);}
-      }));
-    },
-    readDocument:async(projectId:string,id:string)=>{try{return await elementRuntime.getDocument(projectId,id);}catch(error){if((error as {status?:number}).status===404)return null;throw error;}},
-  }:undefined;
   const timelineSchemaPath = path.resolve(
     __dirname,
     "../../vendor/timeline-schema/typescript/dist/src/index.js",
@@ -145,7 +128,6 @@ export default defineConfig(() => {
     },
     plugins: [
       createRuntimeOperationAdmissionPlugin(process.env.ASTRID_RUNTIME_OPERATION_ORIGIN),
-      createElementAdmissionsPlugin(elementAdmissions),
       pairedRelay,
       astridBridgeAuthPlugin,
       createShareMetaPlugin(process.env.ASTRID_SITE_ORIGIN?.trim() || undefined),

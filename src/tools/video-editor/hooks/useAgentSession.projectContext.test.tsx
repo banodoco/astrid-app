@@ -176,6 +176,42 @@ function directStoreClient(acpClient: Record<string, unknown>, projectId: string
 }
 
 describe('project-only ACP prompt boundary', () => {
+  it('dispatches while the new project list is pending and after a fast list failure', async () => {
+    const host = await import('../runtime/admitted-elements');
+    const oldRef = { packId: 'old-pack', kind: 'effect' as const, id: 'old-element', revision: 'old-revision' };
+    host.setAdmittedElementScope('first', [oldRef]);
+    await host.refreshAdmittedElements(async () => ({
+      version: 1, projectId: 'first', realmId: 'old-realm', selectionDigest: 'old-selection', legacy: [], projects: [],
+      elements: [{ ref: oldRef, digest: 'old-digest', url: '', descriptor: oldRef as never,
+        authoring: { packRoot: 'old-root', descriptorPath: 'old-descriptor', componentPath: 'old-component', status: 'ready' } }],
+    }), async () => (() => null));
+    const list = deferred<Response>();
+    const fetchList = vi.fn().mockReturnValueOnce(list.promise).mockRejectedValueOnce(new Error('list unavailable'));
+    vi.stubGlobal('fetch', fetchList);
+    const hook = renderHook(({ scope }) => useSendMessage('project-chat-session', scope), {
+      wrapper, initialProps: { scope: context('second') },
+    });
+    try {
+      await act(async () => { await hook.result.current.mutateAsync({ message: 'pending list' }); });
+      expect(fetchList).toHaveBeenCalledOnce();
+      expect(acp.promptSession).toHaveBeenCalledOnce();
+      expect(snapshot(0).project.id).toBe('second');
+      expect(snapshot(0).project_authoring).toMatchObject({ projectId: 'second', realmId: null, elements: [] });
+      expect(JSON.stringify(snapshot(0))).not.toContain('old-element');
+      expect(host.getAdmittedElementReadiness()).toMatchObject({ projectId: 'second', phase: 'loading' });
+
+      hook.rerender({ scope: context('third') });
+      await act(async () => { await hook.result.current.mutateAsync({ message: 'failed list' }); });
+      expect(acp.promptSession).toHaveBeenCalledTimes(2);
+      expect(snapshot(1).project_authoring).toMatchObject({ projectId: 'third', realmId: null, elements: [] });
+      await waitFor(() => expect(host.getAdmittedElementReadiness()).toMatchObject({ projectId: 'third', phase: 'error' }));
+    } finally {
+      list.reject(new Error('aborted test list'));
+      hook.unmount();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('sends project identity on every turn, refreshes switches, and pins a failed retry to its original scope', async () => {
     const hook = renderHook(({ scope }) => useSendMessage('project-chat-session', scope), {
       wrapper, initialProps: { scope: context('first') },

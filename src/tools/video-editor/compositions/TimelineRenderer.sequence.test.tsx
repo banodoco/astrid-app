@@ -2028,24 +2028,83 @@ describe('TimelineRenderer — track.scale scales the whole track subtree', () =
 describe('TimelineRenderer owner-qualified Astrid references', () => {
   it('replaces the initial unavailable preview after exact admission with the same config and host',async()=>{
     const admissions=await import('../runtime/admitted-elements');
-    admissions.setAdmittedElementScope('preview-project',[]);
     const host:AstridElementHost={...fixtureAstridElementHost,
       get descriptors(){return admissions.getAdmittedElementSelection().elements.map(entry=>entry.descriptor);},
       resolveComponent(id,kind,packId,revision){return revision?admissions.admittedComponent({id,kind,packId,revision}):undefined;},
     };
     const ref={id:'text-card',kind:'effect' as const,packId:'project_preview',revision:'exact-preview-revision'};
+    // The provider scopes the clip's exact pin before the refresh, as it does in production.
+    admissions.setAdmittedElementScope('preview-project',[ref]);
     const config={...buildConfig(),clips:[{id:'activated-exact',track:'V1',at:0,hold:1,clipType:'effect-layer',elementRef:ref}]};
     render(<TimelineRenderer astridElementHost={host} config={config}/>);
     expect(screen.getByTestId('generated-module-placeholder')).toBeInTheDocument();
-    const digest='f'.repeat(64);const key=JSON.stringify([ref.packId,ref.kind,ref.id,ref.revision]);
+    const digest='f'.repeat(64);
     const Owned:FC=()=> <div data-testid="admitted-after-refresh">Exact revision loaded</div>;
     await act(async()=>{await admissions.refreshAdmittedElements(
-      async()=>({digest,moduleUrl:'/@id/__x00__virtual:astrid-element-admissions?v='+digest}),
-      async()=>({configured:true,projectId:'preview-project',selectionDigest:digest,realmId:null,projects:[],
-        elements:[{projectId:'preview-project',descriptor:{...ref,componentPath:'external/fixture.tsx'} as never,authoring:{packRoot:'/pack',descriptorPath:'/pack/element.yaml',componentPath:'/pack/component.tsx',status:'ready'}}],components:{[key]:Owned}}),
+      async()=>({version:1,projectId:'preview-project',realmId:'realm',selectionDigest:digest,projects:[],
+        elements:[{ref,digest,url:`/api/runtime/packs/project-elements/preview-project/${digest}.js`,descriptor:{...ref,componentPath:'external/fixture.tsx'} as never,authoring:{packRoot:'/pack',descriptorPath:'/pack/element.yaml',componentPath:'/pack/component.tsx',status:'ready'}}]}),
+      async()=>Owned as never,
     );});
     expect(screen.queryByTestId('generated-module-placeholder')).not.toBeInTheDocument();
     expect(screen.getByTestId('admitted-after-refresh')).toHaveTextContent('Exact revision loaded');
+  });
+
+  it('shows the reason a failed project-element list could not load on the clip that needs the element', async () => {
+    const admissions = await import('../runtime/admitted-elements');
+    const ref = { id: 'missing-element', kind: 'effect' as const, packId: 'project_reason', revision: 'reason-revision' };
+    admissions.setAdmittedElementScope('reason-project', [ref]);
+    await act(async () => { await admissions.refreshAdmittedElements(async () => { throw new Error('Runtime is not reachable'); }); });
+    render(<TimelineRenderer astridElementHost={fixtureAstridElementHost} config={{ ...buildConfig(), clips: [{
+      id: 'needs-missing-element', track: 'V1', at: 0, hold: 1, clipType: 'effect-layer', elementRef: ref,
+    }] }} />);
+    expect(screen.getByTestId('generated-module-placeholder')).toHaveTextContent('Project elements did not load (Runtime is not reachable)');
+  });
+
+  it('renders a healthy project element and names a failed bundle only on its own placeholder', async () => {
+    const admissions = await import('../runtime/admitted-elements');
+    const good = { id: 'healthy-element', kind: 'effect' as const, packId: 'project_partial', revision: 'one' };
+    const bad = { ...good, id: 'bad-element' };
+    const missing = { ...good, id: 'unlisted-element' };
+    const host: AstridElementHost = { ...fixtureAstridElementHost,
+      get descriptors() { return admissions.getAdmittedElementSelection().elements.map(element => element.descriptor); },
+      resolveComponent(id, kind, packId, revision) { return revision ? admissions.admittedComponent({ id, kind, packId, revision }) : undefined; },
+    };
+    admissions.setAdmittedElementScope('partial-project', [good, bad, missing]);
+    const makeEntry = (ref: typeof good, digit: string) => ({ ref, digest: digit.repeat(64), url: '/bundle.js',
+      descriptor: { ...ref, componentPath: '/component.tsx' } as never,
+      authoring: { packRoot: '/pack', descriptorPath: '/pack/element.yaml', componentPath: '/pack/component.tsx', status: 'ready' } });
+    const Healthy: FC = () => <div data-testid="healthy-project-element">healthy</div>;
+    await act(async () => { await admissions.refreshAdmittedElements(async () => ({ version: 1, projectId: 'partial-project',
+      realmId: 'realm', selectionDigest: 'd'.repeat(64), projects: [], legacy: [], elements: [makeEntry(good, '1'), makeEntry(bad, '2')] }),
+      async entry => { if (entry.ref.id === bad.id) throw new Error('bad bundle rejected'); return Healthy as never; }); });
+    render(<TimelineRenderer astridElementHost={host} config={{ ...buildConfig(), clips: [good, bad, missing].map((ref, i) => ({
+      id: `partial-${i}`, track: 'V1', at: i, hold: 1, clipType: 'effect-layer', elementRef: ref,
+    })) }} />);
+    expect(screen.getByTestId('healthy-project-element')).toBeInTheDocument();
+    const placeholders = screen.getAllByTestId('generated-module-placeholder');
+    expect(placeholders).toHaveLength(2);
+    expect(placeholders[0]).toHaveTextContent('bad bundle rejected');
+    expect(placeholders[1]).not.toHaveTextContent('bad bundle rejected');
+  });
+
+  it('keeps every other clip mounted while a project element is still loading, and names the wait on that clip only', async () => {
+    const admissions = await import('../runtime/admitted-elements');
+    const ref = { id: 'slow-element', kind: 'effect' as const, packId: 'project_loading', revision: 'loading-revision' };
+    admissions.setAdmittedElementScope('loading-project', [ref]);
+    // The scope change leaves the readiness at `loading`: nothing has been listed yet.
+    expect(admissions.getAdmittedElementReadiness().phase).toBe('loading');
+    const view = render(<TimelineRenderer astridElementHost={fixtureAstridElementHost} config={{
+      ...buildConfig(),
+      tracks: [{ id: 'V1', kind: 'visual' }, { id: 'frames', kind: 'visual' }],
+      clips: [
+        { id: 'plain-picture', clipType: 'hold', track: 'frames', at: 0, hold: 1 },
+        { id: 'needs-slow-element', track: 'V1', at: 0, hold: 1, clipType: 'effect-layer', elementRef: ref },
+      ],
+    }} />);
+    expect(view.container.querySelector('[data-clip-id="plain-picture"]')).not.toBeNull();
+    const placeholder = screen.getByTestId('generated-module-placeholder');
+    expect(placeholder).toHaveAttribute('data-clip-id', 'needs-slow-element');
+    expect(placeholder).toHaveTextContent('Project elements are still loading.');
   });
 
   it.each(['local', 'rendering'])('passes the %s owner to the component bridge', (packId) => {

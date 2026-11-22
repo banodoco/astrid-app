@@ -1,5 +1,66 @@
 # Synthetic save-loop sweep
 
+## Compiled measurement diagnostics
+
+The reusable Plan 77 recorders live in [`diagnostics/`](diagnostics/). They
+contain source only; captures and measurement outputs are not part of the App
+checkout. Build and serve the compiled App on the local origin expected by the
+recorders, using the installed browser and Playwright module paths:
+
+```sh
+npm run build
+SAVE_LOOP_CHROME=/absolute/path/to/chrome \
+SAVE_LOOP_PLAYWRIGHT=/absolute/path/to/node_modules/playwright/index.mjs \
+npm run preview -- --host 127.0.0.1 --port 2400 --strictPort
+```
+
+Prepare and own the synthetic stack with the existing
+[`quick-backup-cycle.sh`](quick-backup-cycle.sh) workflow documented below.
+Its `backup` operation invokes Runtime's authenticated backup and verification;
+`restore-run` verifies the bundle, restores and adopts it into a fresh owned
+stack, then runs the normal quick sweep. Use its exact argument order, marker,
+fresh output paths and expected versions file. The diagnostic recorders only
+read that stack and do not replace backup, restore or adoption.
+
+For a compiled v30 opening, provide the owned stack root, its v30 manifest, a
+new result filename, and an explicit absolute py-spy executable. The collector
+checks the exact restored fixture/version, browser assets (no Vite source),
+visible writable controls, terminal public head, and zero timeline commit
+POSTs. It retains the page monotonic opening clock and separately timed public
+head proof. If the optional release-current terminal proof cannot complete in
+the browser, it invokes the packaged `terminal-public-read.mjs` after browser
+close; that helper uses the App's shipped public snapshot, runtime identity and
+fixture-ID utilities. Set `P77_PROFILE_RUNTIME=1` to record py-spy stacks;
+rank a resulting profile record with `python3 diagnostics/rank-runtime-profile.py RESULT.json`.
+The raw trace must remain adjacent as `RESULT.json.py-spy.raw` and match its
+sample receipt. Invoke it with explicit owned output paths:
+
+```sh
+P77_PROFILE_RUNTIME=1 \
+SAVE_LOOP_CHROME=/absolute/path/to/chrome \
+SAVE_LOOP_PLAYWRIGHT=/absolute/path/to/node_modules/playwright/index.mjs \
+node scripts/save-loop/diagnostics/capture-compiled-v30.mjs \
+  /absolute/owned/stack /absolute/owned/stack/results/manifest-v30.json \
+  /absolute/owned/stack/results/compiled-v30.json \
+  --py-spy /absolute/path/to/py-spy
+python3 scripts/save-loop/diagnostics/rank-runtime-profile.py \
+  /absolute/owned/stack/results/compiled-v30.json
+```
+
+The geometry Playwright adapter is selected through `SAVE_LOOP_PLAYWRIGHT` and
+records at most 24 trusted pointer geometry observations to the owned stack's
+`results/browser-geometry.jsonl`, after checking the exact stack marker and
+v30 target. `restart-probe.py` takes an absolute owned sandbox base, stack,
+steps file, output file and PID (or `once`). It appends one compact JSON object
+per sample: UTC time, owned stack path, free/load, cgroup memory counters and
+events, stack/temp/profile disk sizes, and process count. It does not inspect
+process arguments or environments. Keep its JSONL under the same dedicated
+owned sandbox; do not use it to gather browser or private logs.
+
+These commands provide static recorder packaging, not a new browser run or a
+product performance qualification. See the existing backup/restore and run
+qualification below before scheduling any measurement.
+
 ## Plan 77 quick indicator
 
 For one synthetic fixture, use the owned `quick-backup-cycle.sh restore-run`

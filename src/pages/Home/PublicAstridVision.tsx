@@ -13,7 +13,7 @@ import { VisionDetailDialog } from './VisionDetailDialog';
 import { VisionDialog } from './VisionDialog';
 import { VisionPrincipleSigil } from './VisionPrincipleSigil';
 import { VisionSectionNav } from './VisionSectionNav';
-import { PublicAstridPlanet } from './PublicAstridPlanet';
+import { PublicAstridPlanet } from './planet/PublicAstridPlanet';
 import { aspirationsForSubject, type VisionSubject } from './visionHierarchy';
 import type { PublicVisionContent } from './publicVisionContent';
 import './PublicAstridVision.css';

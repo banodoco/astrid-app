@@ -1,13 +1,13 @@
 import { useEffect, useRef } from 'react';
-import planetStill from './planet/planet-still.png';
+import planetStill from './planet-still.png';
 
 /**
  * Owns the planet renderer's canvas and keeps the engine outside the route's
  * initial module graph. A still presentation can keep the same stage without
  * requesting Three or the engine chunk.
  */
-type EngineModule = typeof import('./planet/planetEngine');
-const loadPlanetEngine = () => import('./planet/planetEngine');
+type EngineModule = typeof import('./planetEngine');
+const loadPlanetEngine = () => import('./planetEngine');
 
 export function PublicAstridPlanet({ live, fixedPose = false, loadEngine = loadPlanetEngine }: { live: boolean; fixedPose?: boolean; loadEngine?: () => Promise<EngineModule> }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);

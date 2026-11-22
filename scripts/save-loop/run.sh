@@ -3,12 +3,14 @@
 set -Eeuo pipefail
 umask 077
 APP="$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
-usage='Usage: SAVE_LOOP_CHROME=/absolute/path/to/chrome scripts/save-loop/run.sh
+usage='Usage: SAVE_LOOP_CHROME=/absolute/path/to/chrome scripts/save-loop/run.sh [--variant large-shots]
 
 Creates a new isolated stack and synthetic fixture, runs the save-loop matrix,
 and stops the stack. Outputs are retained in the printed directory.'
 if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then echo "$usage"; exit 0; fi
-[[ $# == 0 ]] || { echo "$usage" >&2; exit 2; }
+variant=standard
+if [[ $# == 2 && "$1" == --variant && "$2" == large-shots ]]; then variant=large-shots
+elif [[ $# != 0 ]]; then echo "$usage" >&2; exit 2; fi
 fail() { echo "STOP: $*" >&2; exit 1; }
 case "$(uname -s)" in Linux|Darwin) ;; *) fail 'Linux or macOS is required.' ;; esac
 for cmd in node npm git curl ffmpeg df; do command -v "$cmd" >/dev/null || fail "$cmd is required."; done
@@ -26,4 +28,4 @@ available_kib="$(df -Pk "$base" | awk 'NR == 2 {print $4}')"
 unset SAVE_LOOP_CLIPS SAVE_LOOP_DOCUMENT_BYTES SAVE_LOOP_COMMIT_RATIO SAVE_LOOP_RESULTS
 run_dir="$(mktemp -d "$base/run.XXXXXXXX")"
 echo "Run outputs: $run_dir"
-exec env SL1_SCRATCH="$run_dir" SL1_ON_DEMAND=1 "$APP/scripts/save-loop/start-isolated-linux.sh"
+exec env SL1_SCRATCH="$run_dir" SL1_ON_DEMAND=1 SAVE_LOOP_VARIANT="$variant" "$APP/scripts/save-loop/start-isolated-linux.sh"

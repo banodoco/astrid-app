@@ -2,6 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type Mutable
 import { isInteractionActive, onInteractionEnd, type InteractionStateRef } from '@/tools/video-editor/lib/interaction-state.ts';
 import { shouldAcceptPolledData } from '@/tools/video-editor/lib/timeline-save-utils.ts';
 import { buildTimelineData, preserveUploadingClips, type TimelineData } from '@/tools/video-editor/lib/timeline-data.ts';
+import { withDefaultTimelineOutput } from '@/tools/video-editor/lib/defaults.ts';
+import { canonicalJsonStringify } from '@/tools/video-editor/data/typed/timelineBundle.ts';
 import type { DataProvider, TimelineHeadRevision } from '@/tools/video-editor/data/DataProvider.ts';
 import type { CommitDataOptions } from '@/tools/video-editor/hooks/useTimelineCommit.ts';
 import type { TimelineStoreApi } from '@/tools/video-editor/hooks/timelineStore.ts';
@@ -128,6 +130,17 @@ export function getTimelinePollRejectionReason({
   return null;
 }
 
+function pollSignatureWithDefaultOutput(data: TimelineData): string {
+  const { config, registry, sourceItemsBySchemaRef, transcriptReferences } = data;
+  const { output } = withDefaultTimelineOutput(config);
+  return canonicalJsonStringify({
+    config: { ...config, output: { ...config.output, ...output } },
+    registry,
+    sourceItemsBySchemaRef,
+    transcriptReferences,
+  });
+}
+
 export function usePollSync({
   store,
   queries,
@@ -234,17 +247,20 @@ export function usePollSync({
       if (!polledData.head) return 'unknown head';
       const currentHead = headRevisionRef?.current;
       if (currentHead && (currentHead.projectId !== polledData.head.projectId || currentHead.timelineId !== polledData.head.timelineId)) return 'different scope';
-      const mountedHead = getDataRef().current?.head;
+      const mountedData = getDataRef().current;
+      const mountedHead = mountedData?.head;
       if (
-        mountedHead?.headRevisionId
+        mountedData
+        && mountedHead?.headRevisionId
         && mountedHead.headPublicationId
         && mountedHead.projectId === polledData.head.projectId
         && mountedHead.timelineId === polledData.head.timelineId
         && mountedHead.headRevisionId === polledData.head.headRevisionId
         && mountedHead.headPublicationId === polledData.head.headPublicationId
+        && pollSignatureWithDefaultOutput(mountedData) === pollSignatureWithDefaultOutput(polledData)
       ) {
-        // A refetch can fill display defaults for the same immutable publication.
-        // Keep the mounted snapshot aligned with the save handoff's source.
+        // Ignore display-only output defaults so the save handoff keeps its
+        // accepted source. Still adopt a poll that supplies richer timeline data.
         return 'own echo';
       }
       // A same-payload remote publication still changes the CAS base. Local

@@ -37,8 +37,8 @@ async function exitedWithin(proc, ms) {
   ]);
 }
 // One monotonic budget covers navigation and all read-only startup corroboration.
-export function startupBudget(onEvent = event => console.log(JSON.stringify(event))) {
-  const start = performance.now(), deadline = start + 480000;
+export function startupBudget(onEvent = event => console.log(JSON.stringify(event)), duration = 480000) {
+  const start = performance.now(), deadline = start + duration;
   const remaining = () => {
     const ms = Math.floor(deadline - performance.now());
     if (ms <= 0) throw new Error('startup readiness deadline exceeded');
@@ -67,9 +67,9 @@ export function startupBudget(onEvent = event => console.log(JSON.stringify(even
       }
     }
   };
-  return {start, remaining, bounded, read};
+  return {start, deadline, remaining, bounded, read};
 }
-export async function open({onCleanup, fixture, onOpening} = {}){
+export async function open({onCleanup, fixture, onOpening, reducedOpening = false, onProvisional} = {}){
   checkDisk();
   const browserScratch=fs.mkdtempSync(path.join('/tmp','sl-'));
   const profile=browserScratch;
@@ -122,12 +122,13 @@ export async function open({onCleanup, fixture, onOpening} = {}){
       if (!target?.clip_id || !target?.track_id) throw new Error('fixture lacks a selection target');
       if (!process.env.SAVE_LOOP_ROOT) throw new Error('SAVE_LOOP_ROOT required for owned Runtime CPU identity');
       cpu = createCpuSampler(runtimeRoot(process.env.SAVE_LOOP_ROOT), processRoot(proc.pid));
-      startup=startupBudget();
-      const cpuStart=cpu.mark(), start=startup.start;
+      startup=startupBudget(undefined, reducedOpening ? 900000 : 480000);
+      const measureOpening = async (warm = false) => {
+      const cpuStart=cpu.mark(), start=warm ? performance.now() : startup.start;
       const posts=[];
       const observe=request=>{if(request.method()==='POST' && request.url().includes('/api/runtime/')) posts.push(request.url().replace(/.*\/api\//,''));};
       p.on('request',observe);
-      const navigation=p.goto(URL_, {waitUntil:'domcontentloaded', timeout:startup.remaining()});
+      const navigation=warm ? p.reload({waitUntil:'domcontentloaded', timeout:startup.remaining()}) : p.goto(URL_, {waitUntil:'domcontentloaded', timeout:startup.remaining()});
       const selector=`.clip-action[data-clip-id="${target.clip_id}"][data-row-id="${target.track_id}"]`;
       const first15=(async()=>{
         try {
@@ -189,12 +190,16 @@ export async function open({onCleanup, fixture, onOpening} = {}){
       // It is explicitly uncorroborated; the original post-head observer remains below.
       const earlyFull=(async()=>{
         let stableSince=null;
-        while (performance.now()-start < 480000) {
+        while (performance.now() < startup.deadline) {
           const state=await startup.bounded('early_ui', () => p.evaluate(()=>({project:new URL(location.href).searchParams.get('project'), timeline:new URL(location.href).searchParams.get('timeline'), ids:[...document.querySelectorAll('.clip-action[data-clip-id][data-row-id]')].map(e=>e.getAttribute('data-clip-id')), tracks:[...new Set([...document.querySelectorAll('[data-row-id]')].map(e=>e.getAttribute('data-row-id')))], saved:[...document.querySelectorAll('div,span,button')].some(e=>e.children.length===0&&/^saved$/i.test((e.textContent||'').trim()))})));
           const matches=state.project===fixture.project_id && state.timeline===fixture.timeline_id && state.saved && sameIds(state.ids,expected) && sameIds(state.tracks,tracks);
           if (matches) {
             stableSince ??= performance.now();
-            if (performance.now()-stableSince>=800) return {ui_saved_ms:performance.now()-start, stable_ms:performance.now()-stableSince, corroborated:false};
+            if (performance.now()-stableSince>=800) {
+              const value={ui_saved_ms:performance.now()-start, stable_ms:performance.now()-stableSince, corroborated:false};
+              if (onProvisional) onProvisional({warm, value, page:p, startup, marker:performance.now()});
+              return value;
+            }
           } else stableSince=null;
           await startup.bounded('early_ui', () => delay(Math.min(250, startup.remaining())));
         }
@@ -204,7 +209,7 @@ export async function open({onCleanup, fixture, onOpening} = {}){
       const headBefore = await startup.read('head_before_ui', () => publicSnapshot(p, process.env.SAVE_LOOP_BASE_URL, fixture));
       if (!sameIds(headBefore.clipIds, expected)) throw new Error('opening public head clip IDs do not match fixture');
       let full=null;
-      const deadline=start+480000;
+      const deadline=startup.deadline;
       let stableSince=null;
       while(performance.now()<deadline) {
         const state=await startup.bounded('full_ui', () => p.evaluate(()=>({project:new URL(location.href).searchParams.get('project'), timeline:new URL(location.href).searchParams.get('timeline'), ids:[...document.querySelectorAll('.clip-action[data-clip-id][data-row-id]')].map(e=>e.getAttribute('data-clip-id')), tracks:[...new Set([...document.querySelectorAll('[data-row-id]')].map(e=>e.getAttribute('data-row-id')))], saved:[...document.querySelectorAll('div,span,button')].some(e=>e.children.length===0&&/^saved$/i.test((e.textContent||'').trim()))})));
@@ -218,14 +223,18 @@ export async function open({onCleanup, fixture, onOpening} = {}){
       if (!full) opening = {cpu:cpu.delta(cpuStart,'opening_until_full_ui_timeout')};
       const [selected,first15Visible,usable]=await Promise.all([selection,first15,firstUsable]);
       p.off('request',observe);
-      opening={type:'opening', early_full_ui_saved:await earlyFull, selection:selected, first_15_seconds_visibility:first15Visible, first_usable:usable, first_usable_ms:usable.ms, first_usable_target_pass:usable.target_pass, full_ui_saved:full, head_before_ui:{revision:headBefore.headRevision,publication:headBefore.publicationId}, timeout_cpu:opening?.cpu ?? null, limitation:full ? 'Public head identity and exact IDs must be confirmed before this is a full-open claim.' : 'Full UI was not proven; the timeline may virtualize offscreen controls.', target_first_usable_ms:5000,target_full_open_ms:15000};
+      return {type:warm ? 'warm_opening' : 'opening', early_full_ui_saved:await earlyFull, selection:selected, first_15_seconds_visibility:first15Visible, first_usable:usable, first_usable_ms:usable.ms, first_usable_target_pass:usable.target_pass, full_ui_saved:full, head_before_ui:{revision:headBefore.headRevision,publication:headBefore.publicationId}, timeout_cpu:opening?.cpu ?? null, limitation:full ? 'Public head identity and exact IDs must be confirmed before this is a full-open claim.' : 'Full UI was not proven; the timeline may virtualize offscreen controls.', target_first_usable_ms:5000,target_full_open_ms:15000};
+      };
+      opening=await measureOpening();
+      p.__measureWarmOpening=measureOpening;
     } else {
       await p.goto(URL_);
       await p.waitForFunction(()=>[...document.querySelectorAll('div')].some(e=>e.children.length===0&&/^saved$/i.test(e.textContent||'')),null,{timeout:60000});
     }
-    await p.waitForTimeout(15000);
+    if (reducedOpening && startup) await startup.bounded('stability_delay', () => p.waitForTimeout(15000));
+    else await p.waitForTimeout(15000);
     if (opening) { opening.stability_delay_ms=15000; if (onOpening) onOpening(opening); }
-    return {b:{close},p,ev,context:ctx,cpu,opening,startup:fixture ? startup : undefined};
+    return {b:{close},p,ev,context:ctx,cpu,opening,startup:fixture ? startup : undefined, measureWarmOpening:p.__measureWarmOpening};
   } catch(error) {
     try { await close(); }
     catch(cleanupError) {

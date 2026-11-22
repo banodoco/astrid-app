@@ -13,6 +13,7 @@ import { VisionDetailDialog } from './VisionDetailDialog';
 import { VisionDialog } from './VisionDialog';
 import { VisionPrincipleSigil } from './VisionPrincipleSigil';
 import { VisionSectionNav } from './VisionSectionNav';
+import { PublicAstridPlanet } from './planet/PublicAstridPlanet';
 import { aspirationsForSubject, type VisionSubject } from './visionHierarchy';
 import type { PublicVisionContent } from './publicVisionContent';
 import './PublicAstridVision.css';
@@ -86,35 +87,6 @@ function SubjectCounts({ content, subject }: { content: PublicVisionContent; sub
     <span>{gaps} {gaps === 1 ? 'gap' : 'gaps'}</span><span aria-hidden="true"> · </span>
     <span>{projects} {projects === 1 ? 'project' : 'projects'}</span>
   </span>;
-}
-
-const JUGGLED_ITEMS = [
-  { name: 'reel', x: 20, y: 1 },
-  { name: 'chip', x: 1, y: 20 },
-  { name: 'brush', x: 49, y: 19 },
-] as const;
-
-/**
- * The juggling mink, with the three items as separate sprites so they can drift above its paws. The mink
- * is a strip of hand-finished keyframes: it lifts its head and paws, settles, then dips them, and the items
- * rise and sink a beat behind, as if held up by magic.
- */
-function Juggler() {
-  return (
-    <div className="astrid-vision-juggler" aria-hidden="true">
-      <span className="astrid-vision-juggler-mink" />
-      {JUGGLED_ITEMS.map((item) => (
-        <img
-          key={item.name}
-          className="astrid-vision-juggled"
-          data-item={item.name}
-          src={`/astrid-juggler-${item.name}.png`}
-          alt=""
-          style={{ '--x': item.x, '--y': item.y } as CSSProperties}
-        />
-      ))}
-    </div>
-  );
 }
 
 /** The mink at its workbench; the sparks are a looping sprite sheet anchored to the soldering iron's tip. */
@@ -556,7 +528,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
               </p>}
             </div>
           </div>
-          <Juggler />
+          <PublicAstridPlanet live={visible && !reducedMotion} />
         </div>
       </section>
 

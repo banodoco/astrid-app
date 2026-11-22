@@ -62,7 +62,7 @@ try {
   }, fixture.project_id);
   if (project.project_id !== fixture.project_id || project.metadata?.purpose !== 'synthetic Plan 77 save-loop fixture')
     throw new Error('project is not the synthetic Plan 77 sandbox fixture');
-  fs.appendFileSync(resultsPath, JSON.stringify({type:'run', date:new Date().toISOString(), versions, project_id:fixture.project_id, timeline_id:fixture.timeline_id, manifest:manifestPath}) + '\n');
+  fs.appendFileSync(resultsPath, JSON.stringify({type:'run', variant:fixture.variant || 'standard', date:new Date().toISOString(), versions, project_id:fixture.project_id, timeline_id:fixture.timeline_id, manifest:manifestPath}) + '\n');
   const recorder = await createRecorder(page, {fixture, baseUrl, resultsPath, allowEmpty:probeOnly});
   let descriptors = [];
   if (!probeOnly) {

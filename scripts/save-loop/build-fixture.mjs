@@ -24,6 +24,9 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.resolve(here, '../..');
 const root = process.env.SAVE_LOOP_ROOT;
 const baseUrl = process.env.SAVE_LOOP_BASE_URL;
+const variant = process.env.SAVE_LOOP_VARIANT || 'standard';
+const largeShots = variant === 'large-shots';
+const startedAt = Date.now();
 const scratch = path.resolve(process.env.SAVE_LOOP_SCRATCH || `${repo}.env/save-loop`);
 const clipTarget = Number(process.env.SAVE_LOOP_CLIPS || 616);
 const byteTarget = Number(process.env.SAVE_LOOP_DOCUMENT_BYTES || 2_600_000);
@@ -278,6 +281,7 @@ timeline_id = cfg['timeline_id']
 control_id = cfg['one_clip_timeline_id']
 media = cfg['media']
 shots = cfg['shots']
+large_shots = cfg['large_shots']
 visual, audio = cfg['visual_tracks'], cfg['audio_tracks']
 count = cfg['clip_target']
 image_n, video_n = round(count * .25), round(count * .06)
@@ -476,11 +480,32 @@ def populate(timeline, *, control=False):
                             'select': 'parent',
                             'args': {'occurrence_id': occurrence_id,
                                      'shot_id': shot['shot_id'], 'name': shot['name'],
-                                     'track': visual[0], 'on': i * 4.25, 'duration': 4},
+                                     'track': visual[0], 'on': shot.get('on', i * 4.25), 'duration': shot.get('duration', 4)},
                             'created': [f"shot:{shot['shot_id']}", f'occurrence:{occurrence_id}'],
                         }, label='Create generated fixture shot occurrence')
                 commit_batch(tl, timeline, f'Create fixture shots {start + 1}-{start + len(batch)}',
                              f'p77-{timeline}-shots-{start}', make_occurrences, len(batch))
+        if not control and large_shots:
+            for i, shot in enumerate(shots[46:], start=46):
+                owner = f'occurrence:fixture-occurrence-{i:02d}'
+                def child_tracks(t):
+                    for track, kind in (('LV', 'visual'), ('LA', 'audio')):
+                        t.command({'schema_version': 1, 'op': 'track.create', 'version': '1',
+                                   'select': owner, 'args': {'row': {'id': track, 'kind': kind, 'label': track}},
+                                   'intent': {}}, label='Create child track')
+                commit_batch(tl, timeline, f'Add child tracks {i}', f'p77-{timeline}-child-tracks-{i}', child_tracks, 2)
+                for start in range(0, 32, 8):
+                    def add_children(t, start=start):
+                        for j in range(start, start + 8):
+                            kind = 'video' if j % 2 == 0 else 'audio'
+                            pin = media_selections[kind][-1]
+                            row = {'id': f'large-child-{i}-{j:02d}', 'clipType': 'media' if kind == 'video' else 'audio',
+                                   'track': 'LV' if kind == 'video' else 'LA', 'asset': pin['asset'],
+                                   'at': (j // 2) * 30, 'hold': 30, 'from': 0, 'to': 30, 'speed': 1}
+                            t.command({'schema_version': 1, 'op': 'occurrence.add-media', 'version': '1',
+                                       'select': owner, 'args': {'row': row, 'media': pin},
+                                       'intent': {'ownership': 'occurrence'}}, label='Add generated child media')
+                    commit_batch(tl, timeline, f'Add children {i} {start}', f'p77-{timeline}-children-{i}-{start}', add_children, 8)
         document = canonical_documents[timeline]
         actual_tracks = root_tracks(document)
         visual_count = sum(row.get('kind') == 'visual' for row in actual_tracks)
@@ -542,7 +567,37 @@ for shot in shots:
                         'track_id': row.get('track'), 'track_role': 'visual', 'name': shot['name']})
 if {row['track_id'] for row in occurrences} != {'V1'}:
     raise RuntimeError('fixture shot occurrences do not use reserved placement lane V1')
+large_measurement = None
+if large_shots:
+    per_shot = []
+    for i, shot in enumerate(shots[46:], start=46):
+        occurrence = next(row for row in placement_rows(heavy_doc) if row.get('occurrence_id') == f'fixture-occurrence-{i:02d}')
+        shot_revision = next(row for row in heavy_doc['shot_revisions']
+                             if row['shot_id'] == shot['shot_id'] and row['revision_id'] == occurrence['shot_revision_id'])
+        internal = next(row['payload'] for row in heavy_doc['internal_timeline_revisions']
+                        if row['revision_id'] == shot_revision['internal_timeline_revision_id'])
+        children = internal.get('clips', [])
+        expected = {f'large-child-{i}-{j:02d}' for j in range(32)}
+        def matches_child(row):
+            j = int(row['id'].rsplit('-', 1)[1])
+            kind = 'video' if j % 2 == 0 else 'audio'
+            return (row.get('hold') == 30 and row.get('at') == (j // 2) * 30
+                    and row.get('from') == 0 and row.get('to') == 30 and row.get('speed') == 1
+                    and row.get('track') == ('LV' if kind == 'video' else 'LA')
+                    and row.get('asset') == media_selections[kind][-1]['asset'])
+        if {row.get('id') for row in children} != expected or not all(matches_child(row) for row in children):
+            raise RuntimeError(f'large shot {i} child identities or durations differ')
+        if {row.get('id') for row in internal.get('tracks', [])} != {'LV', 'LA'}:
+            raise RuntimeError(f'large shot {i} child tracks differ')
+        if canonical_media_ids(internal) != {media_selections[k][-1]['object_id'] for k in ('video', 'audio')}:
+            raise RuntimeError(f'large shot {i} media identities differ')
+        per_shot.append({'shot_id': shot['shot_id'], 'occurrence_id': occurrence['occurrence_id'],
+                         'child_clips': len(children), 'child_tracks': len(internal['tracks']), 'child_hold_seconds': 30})
+    large_measurement = {'shots': per_shot, 'child_clip_count': sum(row['child_clips'] for row in per_shot),
+                         'child_commit_count': sum('child' in row['label'].lower() for row in receipts),
+                         'child_commit_elapsed_ms': sum(row['elapsed_ms'] for row in receipts if 'child' in row['label'].lower())}
 measurement = {
+    'large_shots': large_measurement,
     'clip_count': len(root_clips(heavy_doc)), 'document_bytes': doc_bytes,
     'document_bytes_source': 'accepted Runtime response data.canonical_document, canonical JSON',
     'registry_asset_count': len(assets),
@@ -580,6 +635,7 @@ print(json.dumps(measurement, sort_keys=True))
 `;
 
 async function main() {
+  if (!['standard', 'large-shots'].includes(variant)) throw new Error('invalid SAVE_LOOP_VARIANT');
   if (!root || !baseUrl) throw new Error('set SAVE_LOOP_ROOT and SAVE_LOOP_BASE_URL for the isolated SL-1 stack');
   const origin = new URL(baseUrl);
   if (!['http:', 'https:'].includes(origin.protocol)) throw new Error('SAVE_LOOP_BASE_URL must use HTTP or HTTPS');
@@ -587,10 +643,25 @@ async function main() {
     throw new Error('save-loop fixture creation requires the owned local isolated stack');
   if (origin.pathname !== '/' || origin.search || origin.hash) throw new Error('SAVE_LOOP_BASE_URL must be a local origin without a path or query');
   if (!Number.isInteger(clipTarget) || clipTarget < 616) throw new Error('SAVE_LOOP_CLIPS must be an integer >= 616');
+  const resolvedRoot = fs.realpathSync(root);
+  const marker = path.join(resolvedRoot, '.sl1-stack-owned');
+  if (resolvedRoot !== path.resolve(root) || !fs.existsSync(marker)
+      || fs.readFileSync(marker, 'utf8') !== `astrid-app-sl1-stack-v1 ${resolvedRoot}`)
+    throw new Error('SAVE_LOOP_ROOT must be the exact owned isolated stack');
+  const pid = fs.readFileSync(path.join(resolvedRoot, 'editor.pid'), 'utf8').trim();
+  if (!/^\d+$/.test(pid)) throw new Error('owned stack editor PID is invalid');
+  const ps = spawnSync('ps', ['-p', pid, '-o', 'args='], {encoding: 'utf8'});
+  const cwd = process.platform === 'darwin'
+    ? spawnSync('lsof', ['-a', '-p', pid, '-d', 'cwd', '-Fn'], {encoding: 'utf8'}).stdout?.split('\n').find(line => line.startsWith('n'))?.slice(1)
+    : fs.realpathSync(`/proc/${pid}/cwd`);
+  if (ps.status !== 0 || !ps.stdout.includes('dev-local-workspace.mjs')
+      || !ps.stdout.includes(path.join(resolvedRoot, 'data')) || cwd !== repo)
+    throw new Error('editor process does not match the owned stack and App checkout');
   const ports = stackPorts(root);
   if (Number(origin.port) !== ports.editor) throw new Error(`SAVE_LOOP_BASE_URL port must match this stack's editor port ${ports.editor}`);
   fs.mkdirSync(scratch, {recursive: true});
   assertDisk();
+  const diskBefore = freeBytes();
   const mediaRoot = path.join(scratch, 'generated-media');
   const images = await mediaPool({dir: path.join(mediaRoot, 'images'), prefix: 'image-', suffix: '.png', count: imageCount,
     ffmpegArgs: pattern => ['-f', 'lavfi', '-i', `color=c=red:s=1920x1080:r=1:d=${imageCount}`,
@@ -605,6 +676,23 @@ async function main() {
   const audios = await mediaPool({dir: path.join(mediaRoot, 'audio'), prefix: 'audio-', suffix: '.wav', count: audioCount,
     ffmpegArgs: pattern => ['-f', 'lavfi', '-i', `aevalsrc=sin(2*PI*(440+floor(t))*t):s=44100:d=${audioCount}`,
       '-f', 'segment', '-segment_time', '1', '-segment_format', 'wav', '-reset_timestamps', '1', '-y', pattern]});
+  if (largeShots) {
+    const dir = path.join(mediaRoot, 'large');
+    fs.mkdirSync(dir, {recursive: true});
+    const video = path.join(dir, 'long-video.mp4');
+    const audio = path.join(dir, 'long-audio.wav');
+    assertDisk();
+    await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i',
+      'testsrc2=s=1280x720:r=15:d=90', '-c:v', 'libx264', '-preset', 'ultrafast',
+      '-pix_fmt', 'yuv420p', '-y', video]);
+    assertDisk();
+    await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i',
+      'sine=frequency=317:sample_rate=44100:duration=90', '-y', audio]);
+    videos.push(video); audios.push(audio);
+    const bytes = [...images, ...videos, ...audios].reduce((sum, file) => sum + fs.statSync(file).size, 0);
+    if (bytes > 1024 ** 3 || freeBytes() - bytes < 15 * 1024 ** 3)
+      throw new Error('generated media exceeds 1 GiB or estimated import would cross the 15 GiB floor');
+  }
   assertUniqueAssets(images, 'image');
   assertUniqueAssets(videos, 'video');
   assertUniqueAssets(audios, 'audio');
@@ -614,7 +702,7 @@ async function main() {
     audio: audios.map(sha256ObjectId),
   };
   const expectedObjectIds = [...objectIdsByKind.image, ...objectIdsByKind.video, ...objectIdsByKind.audio];
-  if (expectedObjectIds.length !== clipTarget || new Set(expectedObjectIds).size !== expectedObjectIds.length)
+  if (expectedObjectIds.length !== clipTarget + (largeShots ? 2 : 0) || new Set(expectedObjectIds).size !== expectedObjectIds.length)
     throw new Error(`expected ${clipTarget} unique generated media object identities; got ${expectedObjectIds.length}`);
   const dropFiles = images.slice(0, 3);
   const dropObjectIds = dropFiles.map(sha256ObjectId);
@@ -644,6 +732,11 @@ async function main() {
     name: `Fixture shot ${String(i + 1).padStart(2, '0')}`,
   }));
 
+  if (largeShots) for (let i = 0; i < 3; i++) shots.push({
+    shot_id: `large-shot-${nonce}-${i}`, name: `Large shot ${i + 1}`,
+    on: 200 + i * 481, duration: 480,
+  });
+
   const versionsDir = path.resolve(root, 'program/versions');
   const installedVersions = fs.readdirSync(versionsDir).filter(name => name !== 'current'
     && fs.existsSync(path.join(versionsDir, name, 'py/bin/python')));
@@ -664,7 +757,7 @@ async function main() {
   const media = {image: images, video: videos, audio: audios};
   const expectedObjectIdsByKind = objectIdsByKind;
   fs.writeFileSync(configPath, JSON.stringify({project_id: projectId, timeline_id: timelineId,
-    one_clip_timeline_id: oneClipTimelineId, clip_target: clipTarget, media, shots,
+    one_clip_timeline_id: oneClipTimelineId, clip_target: clipTarget, media, shots, large_shots: largeShots,
     visual_tracks: visualTracks, audio_tracks: audioTracks, outbox_root: outboxRoot,
     expected_object_ids: expectedObjectIds, expected_object_ids_by_kind: expectedObjectIdsByKind}));
   fs.writeFileSync(scriptPath, sdkScript, {mode: 0o600});
@@ -694,8 +787,9 @@ async function main() {
       || head.head_publication_id !== measurement.accepted_heavy_head.receipt_id)
     throw new Error('public Runtime head does not match the final accepted SDK receipt and canonical document');
   const headObjectIds = [...runtimeMediaIds(headRevision.payload)].sort();
-  const missingHeadIds = expectedObjectIds.filter(objectId => !headObjectIds.includes(objectId));
-  const unexpectedHeadIds = headObjectIds.filter(objectId => !expectedObjectIds.includes(objectId));
+  const parentObjectIds = largeShots ? expectedObjectIds.filter(id => ![objectIdsByKind.video.at(-1), objectIdsByKind.audio.at(-1)].includes(id)) : expectedObjectIds;
+  const missingHeadIds = parentObjectIds.filter(objectId => !headObjectIds.includes(objectId));
+  const unexpectedHeadIds = headObjectIds.filter(objectId => !parentObjectIds.includes(objectId));
   if (missingHeadIds.length || unexpectedHeadIds.length)
     throw new Error(`public Runtime head media identity set differs (missing ${missingHeadIds.length}, unexpected ${unexpectedHeadIds.length})`);
   measurement.actual_head = {revision_id: headRevision.revision_id,
@@ -707,6 +801,7 @@ async function main() {
     && measurement.warm_move_median_ratio >= ratioTarget;
   const manifest = {
     schema_version: 1,
+    variant,
     project_id: projectId,
     timeline_id: timelineId,
     one_clip_timeline_id: oneClipTimelineId,
@@ -729,6 +824,7 @@ async function main() {
       warm_move_median_ratio: ratioTarget}, status: passed ? 'pass' : 'fail'},
     live_proof: {stack_url: baseUrl, generated_at: new Date().toISOString(), second_machine: 'pending'},
   };
+  if (largeShots) Object.assign(manifest.measurement.large_shots, {generated_media_bytes: [...images, ...videos, ...audios].reduce((n, file) => n + fs.statSync(file).size, 0), unique_imported_object_count: expectedObjectIds.length, disk_before_bytes: diskBefore, disk_after_bytes: freeBytes(), build_wall_ms: Date.now() - startedAt});
   const manifestPath = path.join(scratch, `manifest-${projectId}.json`);
   fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
   console.log(`Manifest: ${manifestPath}`);

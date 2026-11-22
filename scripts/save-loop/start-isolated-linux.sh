@@ -340,6 +340,9 @@ printf 'STACK_ROOT=%s\nAPP_SHA=%s\nAGENT_SHA=%s\nRUNTIME_SHA=%s\nEDITOR_PORT=%s\
 echo "Editor URL: $EDITOR_URL"
 echo "Logs: $ROOT/logs"
 if [[ "${SL1_ON_DEMAND:-0}" == 1 ]]; then
+  variant="${SAVE_LOOP_VARIANT:-standard}"
+  [[ "$variant" == standard || "$variant" == large-shots ]] || fail 'Invalid save-loop variant.'
+  export SAVE_LOOP_VARIANT="$variant"
   export SAVE_LOOP_ROOT="$ROOT" SAVE_LOOP_BASE_URL="http://127.0.0.1:$EDITOR_PORT" SAVE_LOOP_SCRATCH="$SCRATCH/fixture"
   mkdir -p "$SAVE_LOOP_SCRATCH"
   node --input-type=module - "$SCRATCH/versions.json" "$APP_SHA" "$AGENT_SHA" "$RUNTIME_SHA" <<'NODE'
@@ -347,9 +350,22 @@ import fs from 'node:fs';
 const [file, app, agent, runtime] = process.argv.slice(2);
 fs.writeFileSync(file, JSON.stringify({app, agent, runtime}, null, 2) + '\n');
 NODE
+  node --input-type=module - "$SCRATCH/status.json" "$variant" <<'NODE'
+import fs from 'node:fs';
+const [file, variant] = process.argv.slice(2);
+fs.writeFileSync(file, JSON.stringify({variant, status: 'running'}) + '\n');
+NODE
   node "$APP/scripts/save-loop/build-fixture.mjs" >"$SCRATCH/fixture.log" 2>&1 &
   RUN_CHILD_PID=$!
-  wait "$RUN_CHILD_PID" || fail "Fixture failed; see $SCRATCH/fixture.log"
+  if ! wait "$RUN_CHILD_PID"; then
+    RUN_CHILD_PID=
+    node --input-type=module - "$SCRATCH/status.json" "$variant" <<'NODE'
+import fs from 'node:fs';
+const [file, variant] = process.argv.slice(2);
+fs.writeFileSync(file, JSON.stringify({variant, status: 'fail', stage: 'fixture'}) + '\n');
+NODE
+    fail "Fixture failed; see $SCRATCH/fixture.log"
+  fi
   RUN_CHILD_PID=
   manifest="$(node --input-type=module - "$SAVE_LOOP_SCRATCH" <<'NODE'
 import fs from 'node:fs';
@@ -362,8 +378,15 @@ NODE
 )"
   node "$APP/scripts/save-loop/sweep.mjs" --manifest "$manifest" --results "$SCRATCH/results.jsonl" --versions "$SCRATCH/versions.json" &
   RUN_CHILD_PID=$!
-  wait "$RUN_CHILD_PID"
+  result=0
+  wait "$RUN_CHILD_PID" || result=$?
   RUN_CHILD_PID=
+  node --input-type=module - "$SCRATCH/status.json" "$variant" "$result" <<'NODE'
+import fs from 'node:fs';
+const [file, variant, result] = process.argv.slice(2);
+fs.writeFileSync(file, JSON.stringify({variant, status: result === '0' ? 'pass' : 'fail', stage: 'sweep', exit_code: Number(result)}) + '\n');
+NODE
+  exit "$result"
 else
   echo "Stop this owned editor and Runtime with Ctrl+C. The wrapper remains attached until stopped."
   wait "$EDITOR_PID"

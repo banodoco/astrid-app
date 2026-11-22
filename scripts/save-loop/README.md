@@ -25,3 +25,33 @@ check this floor. The fixture may take substantial time and space.
 The older `scripts/save-loop/start-isolated-linux.sh` remains available for a
 foreground isolated stack. It uses `SL1_SCRATCH` and replaces only its own
 marked previous stack. The on-demand command always uses a new directory.
+
+An independent optional run exercises large nested shots:
+
+```sh
+SAVE_LOOP_CHROME=/absolute/path/to/chrome scripts/save-loop/run.sh --variant large-shots
+```
+
+This creates a fresh stack and performs one fixture build and sweep. It retains
+all standard 616 parent clips, 46 normal shot occurrences, the 2.6 MB document
+and 15x one-clip timing requirements, and all matrix targets. In addition,
+three generated 480-second shot occurrences each contain 32 child clips on
+visual and audio tracks. The clips use generated 90-second video and audio
+sources, with 30-second source windows. No user media or GPU is used. The
+variant is optional and does not run as part of the default command.
+
+Each run has its own directory. `status.json`, the manifest's `variant` and
+`measurement.large_shots`, and the `run` row in `results.jsonl` identify the
+selected run. The extra measurement records child counts, accepted commit
+timing, generated media bytes, build time and disk before/after. A successful
+fixture must verify accepted child tracks, clips and media identities. The
+standard measurement and sweep requirements remain in force for both variants.
+`status.json` reports a completed fixture or sweep failure; an interrupted run
+may remain `running` and is not a pass.
+
+The larger video is encoded sequentially on CPU. The extra generation can take
+substantial wall time and disk space. The initial 25 GiB free-space requirement
+and 15 GiB stop floor apply; generated source media is capped at 1 GiB and the
+builder checks space for an additional copy before importing it. Actual Runtime
+and installation overhead can require more. The default command remains the
+standard run; a pass of either variant does not establish a pass for the other.

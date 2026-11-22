@@ -1413,7 +1413,7 @@ export function createShotTimelineDataProvider(
   let captureChain: Promise<void> = Promise.resolve();
   let capturedExpectedHeadRevisionId = composition.headRevisionId;
   const localDocumentSave: TimelinePersistenceHandoff | undefined = localSaveEnabled ? {
-    async capture(source) {
+    async capture(source, _gestureBasis, draftOwnerId) {
       const { config: nextConfig, registry: nextRegistry, head } = structuredClone(source);
       assertEditorHeadIsCurrent();
       const rawComposition = composition;
@@ -1466,7 +1466,7 @@ export function createShotTimelineDataProvider(
               after: toOutboxJson(before),
               label: 'Edit shot timeline',
               commands: sharedCommands.commands,
-            });
+            }, draftOwnerId);
           } else {
             const edit = popupDocumentAfter(
               before,
@@ -1498,7 +1498,7 @@ export function createShotTimelineDataProvider(
                 commands: [command],
                 documentIntent: intent,
               };
-              await session.append(save);
+              await session.append(save, draftOwnerId);
             } else {
               await session.appendDocument({
                 before,
@@ -1508,7 +1508,7 @@ export function createShotTimelineDataProvider(
                 step: { ...step, reads: edit.reads },
                 reads: edit.reads,
                 merge: 'atomic',
-              });
+              }, draftOwnerId);
             }
           }
           pendingLocalSaveSignature = signature;
@@ -1564,10 +1564,12 @@ export function createShotTimelineDataProvider(
     bindLocalDocumentSave: (timelineId) => localDocumentSave
       ? bindTimelinePersistenceHandoff(provider, timelineId, {
           ...localDocumentSave,
-          capture(source) {
+          capture(source, gestureBasis, draftOwnerId) {
             const snapshot = structuredClone(source);
             const head = readSourceHead();
-            return head.then(verified => localDocumentSave.capture({ ...snapshot, head: snapshot.head ?? verified }));
+            return head.then(verified => localDocumentSave.capture(
+              { ...snapshot, head: snapshot.head ?? verified }, gestureBasis, draftOwnerId,
+            ));
           },
         }) : undefined,
     get timelineQueryIdentity() {

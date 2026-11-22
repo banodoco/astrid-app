@@ -15,6 +15,7 @@ import {
   saveTimelineDraft,
   saveTimelineDraftIfOwner,
 } from '@/tools/video-editor/data/timelineDraftIndexedDb.ts';
+import { createCommitOutbox } from '@/tools/video-editor/commands/commitOutbox.ts';
 
 describe('timelineDraftIndexedDb — one-slot recovery draft (plan-v5 B9)', () => {
   beforeEach(() => {
@@ -42,6 +43,43 @@ describe('timelineDraftIndexedDb — one-slot recovery draft (plan-v5 B9)', () =
 
   it('returns null for a timeline with no draft', async () => {
     expect(await loadTimelineDraft('tl-ghost')).toBeNull();
+  });
+
+  it('suppresses only the exact acknowledged draft and recovers a newer refused draft for its outbox owner', async () => {
+    const scope = { realmId: 'realm', actorId: 'actor', projectId: 'project', timelineId: 'timeline' };
+    const outbox = createCommitOutbox({ indexedDB: fakeIndexedDb, exclusiveLock: async (_name, work) => work() });
+    let outboxOwnerId = '';
+    const acknowledgedDraftOwnerId = 'draft-acknowledged';
+    const refusedDraftOwnerId = 'draft-refused';
+
+    await outbox.create(scope, async (claimed, ownerId) => {
+      outboxOwnerId = ownerId;
+      await claimed.append({ edit: 'acknowledged' }, { head: { revisionId: 'r0', publicationId: 'p0' } }, acknowledgedDraftOwnerId);
+      await claimed.dispatch((intent) => ({
+        method: 'POST', path: '/v1/projects/project/timelines/timeline/commit', body: intent.payload,
+      }), async () => ({ kind: 'accepted', head: { revisionId: 'r1', publicationId: 'p1' }, value: {} }));
+      await claimed.append({ edit: 'refused' }, { head: { revisionId: 'r1', publicationId: 'p1' } }, refusedDraftOwnerId);
+      await claimed.dispatch((intent) => ({
+        method: 'POST', path: '/v1/projects/project/timelines/timeline/commit', body: intent.payload,
+      }), async () => ({ kind: 'rejected', error: { status: 'refused' } }));
+    });
+
+    await saveTimelineDraft('timeline', { edit: 'acknowledged' }, 1, {
+      recoveryKey: 'timeline:occurrence', ownerId: acknowledgedDraftOwnerId,
+      outboxOwnerId, outboxScope: scope,
+    });
+    expect(await loadTimelineDraft('timeline:occurrence')).toBeNull();
+
+    await saveTimelineDraft('timeline', { edit: 'refused' }, 2, {
+      recoveryKey: 'timeline:occurrence', ownerId: refusedDraftOwnerId,
+      draftIdentity: refusedDraftOwnerId, outboxOwnerId, outboxScope: scope,
+    });
+    expect(await loadTimelineDraft('timeline:occurrence')).toMatchObject({
+      ownerId: refusedDraftOwnerId,
+      draftIdentity: refusedDraftOwnerId,
+      outboxOwnerId,
+      draft: { edit: 'refused' },
+    });
   });
 
   it('clear removes the slot; the draft is retained until then', async () => {

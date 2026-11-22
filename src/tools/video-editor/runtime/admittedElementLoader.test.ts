@@ -71,6 +71,19 @@ afterEach(() => {
 });
 
 describe('project element list parsing', () => {
+  it('isolates a well-shaped owner mismatch while preserving a healthy sibling', async () => {
+    const { parseProjectElementList } = await loader();
+    const good = entryFor('b'.repeat(64), 'good');
+    const bad = entryFor('c'.repeat(64), 'bad');
+    const badOwner = { ...bad, descriptor: { ...(bad.descriptor as unknown as Record<string, unknown>), packId: 'other_pack' } };
+    const parsed = parseProjectElementList(listBody([good, badOwner]), 'project');
+    expect(parsed.elements[0]).toEqual(good);
+    expect(parsed.elements[1]).toMatchObject({ ref: bad.ref, refusal: expect.stringContaining('owner') });
+    expect(() => parseProjectElementList(listBody([badOwner, badOwner]), 'project')).toThrow('twice');
+    expect(() => parseProjectElementList(listBody([{ ...badOwner, descriptor: { ...badOwner.descriptor, id: 'wrong' } }]), 'project')).toThrow('incomplete descriptor');
+    expect(() => parseProjectElementList(listBody([{ ...badOwner, descriptor: { ...badOwner.descriptor, packId: '' } }]), 'project')).toThrow('incomplete descriptor');
+  });
+
   it('accepts the Runtime shape and names each ref exactly', async () => {
     const { parseProjectElementList } = await loader();
     const digest = 'b'.repeat(64);
@@ -187,6 +200,46 @@ describe('reading the project list', () => {
 });
 
 describe('importing one admitted bundle', () => {
+  it('fetches a validated catalog asset with the exact canonical ref digest, without changing catalog URLs', async () => {
+    const { importProjectElement, parseProjectElementList } = await loader();
+    const digest = digestOf(COMPONENT_SOURCE);
+    const first = entryFor(digest);
+    const secondBase = entryFor(digest, 'r2');
+    const second = { ...secondBase, ref: { ...secondBase.ref, id: 'blocks?ref=raw&x=1' },
+      descriptor: { ...secondBase.descriptor, id: 'blocks?ref=raw&x=1' } };
+    const catalog = parseProjectElementList(listBody([first, second]), 'project');
+    const bytes = new TextEncoder().encode(COMPONENT_SOURCE);
+    fetchMock.mockResolvedValue({ ok: true, redirected: false, arrayBuffer: async () => bytes.buffer.slice(0) });
+    const importModule = vi.fn(async () => ({ default: () => null }));
+    const canonicalRef = (entry: typeof first) => JSON.stringify([entry.ref.packId, entry.ref.kind, entry.ref.id, entry.ref.revision]);
+    const expectedFetch = async (entry: typeof first) => `http://127.0.0.1:17340${entry.url}?ref=${digestOf(canonicalRef(entry))}`;
+    origin = 'http://127.0.0.1:17340';
+
+    await importProjectElement(catalog.elements[0], new AbortController().signal, importModule);
+    await importProjectElement(catalog.elements[1], new AbortController().signal, importModule);
+
+    expect(catalog.elements.map(entry => entry.url)).toEqual([first.url, second.url]);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      await expectedFetch(first), await expectedFetch(second),
+    ]);
+    expect(fetchMock.mock.calls[0][0]).not.toBe(fetchMock.mock.calls[1][0]);
+    expect(String(fetchMock.mock.calls[1][0])).not.toContain('blocks?ref=raw&x=1');
+  });
+
+  it('surfaces only the known pre-release binding refusal from the selected asset', async () => {
+    const { importProjectElement } = await loader();
+    const reason = 'This project element was admitted by a pre-release build. Change its component source, admit the element again, then place the new revision on the clip.';
+    const entry = entryFor(digestOf(COMPONENT_SOURCE));
+    const importModule = vi.fn();
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ details: { reason: 'project_element_binding_missing' }, message: 'untrusted' }), { status: 409 }));
+    await expect(importProjectElement(entry, new AbortController().signal, importModule)).rejects.toThrow(reason);
+    expect(importModule).not.toHaveBeenCalled();
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ details: { reason: 'other' }, message: reason }), { status: 409 }));
+    await expect(importProjectElement(entry, new AbortController().signal, importModule)).rejects.toThrow('could not be read from the Runtime');
+    fetchMock.mockResolvedValueOnce({ ok: false, redirected: true, status: 409, json: vi.fn().mockResolvedValue({ details: { reason: 'project_element_binding_missing' } }) });
+    await expect(importProjectElement(entry, new AbortController().signal, importModule)).rejects.toThrow('could not be read from the Runtime');
+  });
+
   it('rejects bytes that do not match the digest the Runtime admitted, without importing them', async () => {
     const { importProjectElement } = await loader();
     const admitted = digestOf(COMPONENT_SOURCE);

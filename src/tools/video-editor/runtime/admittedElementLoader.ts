@@ -1,6 +1,7 @@
 import type { ComponentType } from 'react';
 import { runtimeApiBase, runtimeOrigin } from '@/integrations/runtime/connection';
 import { assertHostSharedModules, fetchVerifiedBytes, importRuntimeModule, isRecord as record, SHA256, SharedModulesError } from './runtimeModuleImport';
+import { computeSha256 } from './extensionIntegrity';
 import type { AdmittedDescriptor, AdmittedElement, ProjectElementAuthoring } from './admitted-elements';
 import type { AstridElementComponentProps } from './astrid-element-host';
 
@@ -12,6 +13,7 @@ export type ElementRef = { packId: string; kind: 'effect' | 'animation' | 'trans
 export type ProjectElementEntry = {
   ref: ElementRef; digest: string; url: string;
   descriptor: AdmittedDescriptor; authoring: AdmittedElement['authoring'];
+  refusal?: string;
 };
 /** An element admitted before the Runtime kept its compiled bundle: listed by name, never loadable until re-admitted. */
 export type LegacyElementRef = { packId: string; kind: ElementRef['kind']; id: string };
@@ -32,7 +34,7 @@ const allText = (value: Record<string, unknown>, keys: readonly string[]) => key
 /** The descriptor fields the editor's catalog and placeholders read, so a consumer never meets a missing one. */
 const validDescriptor = (descriptor: Record<string, unknown>, ref: Record<string, unknown>) => {
   const renderability = descriptor.renderability;
-  return descriptor.packId === ref.packId && descriptor.kind === ref.kind && descriptor.id === ref.id && descriptor.revision === ref.revision
+  return text(descriptor.packId) && !!descriptor.packId && descriptor.kind === ref.kind && descriptor.id === ref.id && descriptor.revision === ref.revision
     && allText(descriptor, ['label', 'description', 'componentPath']) && !!descriptor.label && !!descriptor.componentPath
     && Array.isArray(descriptor.parameters) && descriptor.parameters.every((parameter: unknown) => record(parameter) && text(parameter.name) && text(parameter.type))
     && record(descriptor.defaults) && record(renderability) && Object.keys(renderability).length === RENDERABILITY_KEYS.length
@@ -52,6 +54,20 @@ const runtimeOriginPath = (projectId: string, digest: string) => (
 );
 
 export const elementKey = (ref: ElementRef) => JSON.stringify([ref.packId, ref.kind, ref.id, ref.revision]);
+
+/** Add an exact-ref selector only after confirming the catalog supplied a local, bare digest asset URL. */
+async function scopedElementAssetUrl(entry: ProjectElementEntry): Promise<string> {
+  const configuredOrigin = runtimeOrigin();
+  const url = new URL(`${configuredOrigin}${entry.url}`, window.location.origin);
+  const expectedOrigin = configuredOrigin || window.location.origin;
+  if (url.origin !== new URL(expectedOrigin).origin || url.search || url.hash
+    || !/^\/api\/runtime\/packs\/project-elements\/[^/]+\/[a-f0-9]{64}\.js$/.test(url.pathname)
+    || !url.pathname.endsWith(`/${entry.digest}.js`)) {
+    throw new Error('Runtime returned an invalid project element asset URL.');
+  }
+  const refDigest = await computeSha256(new TextEncoder().encode(elementKey(entry.ref)));
+  return `${configuredOrigin ? url.origin : ''}${url.pathname}?ref=${refDigest}`;
+}
 
 /**
  * Validates the Runtime's list shape for the project the editor asked about. The list must name that same project;
@@ -81,6 +97,9 @@ export function parseProjectElementList(value: unknown, projectId: string): Proj
     const key = elementKey(ref as unknown as ElementRef);
     if (keys.has(key)) throw new Error(`Runtime listed the element ${ref.id} twice.`);
     keys.add(key);
+    if (entry.descriptor.packId !== ref.packId) {
+      return { ...entry, refusal: `Project element ${ref.id} has a mismatched pack owner.` } as unknown as ProjectElementEntry;
+    }
     return entry as unknown as ProjectElementEntry;
   });
   return { version: 1, projectId, realmId: value.realmId, selectionDigest: value.selectionDigest,
@@ -111,11 +130,21 @@ export async function importProjectElement(
   signal: AbortSignal,
   importModule: (url: string) => Promise<{ default?: unknown }> = importRuntimeModule,
 ): Promise<ProjectElementComponent> {
+  if (entry.refusal) throw new Error(entry.refusal);
   try { assertHostSharedModules(HOST_SPECIFIERS); } catch (error) {
     if (error instanceof SharedModulesError) throw new Error(`${error.message} Rebuild the editor or reload it.`);
     throw error;
   }
-  const bytes = await fetchVerifiedBytes(`${runtimeOrigin()}${entry.url}`, entry.digest, signal, `Project element ${entry.ref.id}`);
+  const assetUrl = await scopedElementAssetUrl(entry);
+  const bytes = await fetchVerifiedBytes(assetUrl, entry.digest, signal, `Project element ${entry.ref.id}`, async response => {
+    if (response.status !== 409) return;
+    let body: unknown;
+    try { body = await response.json(); } catch { return; }
+    signal.throwIfAborted();
+    if (record(body) && record(body.details) && body.details.reason === 'project_element_binding_missing') {
+      return 'This project element was admitted by a pre-release build. Change its component source, admit the element again, then place the new revision on the clip.';
+    }
+  });
   signal.throwIfAborted();
   const moduleUrl = URL.createObjectURL(new Blob([bytes], { type: 'text/javascript' }));
   let namespace: { default?: unknown };

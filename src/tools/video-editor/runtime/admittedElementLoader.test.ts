@@ -71,6 +71,19 @@ afterEach(() => {
 });
 
 describe('project element list parsing', () => {
+  it('isolates a well-shaped owner mismatch while preserving a healthy sibling', async () => {
+    const { parseProjectElementList } = await loader();
+    const good = entryFor('b'.repeat(64), 'good');
+    const bad = entryFor('c'.repeat(64), 'bad');
+    const badOwner = { ...bad, descriptor: { ...(bad.descriptor as unknown as Record<string, unknown>), packId: 'other_pack' } };
+    const parsed = parseProjectElementList(listBody([good, badOwner]), 'project');
+    expect(parsed.elements[0]).toEqual(good);
+    expect(parsed.elements[1]).toMatchObject({ ref: bad.ref, refusal: expect.stringContaining('owner') });
+    expect(() => parseProjectElementList(listBody([badOwner, badOwner]), 'project')).toThrow('twice');
+    expect(() => parseProjectElementList(listBody([{ ...badOwner, descriptor: { ...badOwner.descriptor, id: 'wrong' } }]), 'project')).toThrow('incomplete descriptor');
+    expect(() => parseProjectElementList(listBody([{ ...badOwner, descriptor: { ...badOwner.descriptor, packId: '' } }]), 'project')).toThrow('incomplete descriptor');
+  });
+
   it('accepts the Runtime shape and names each ref exactly', async () => {
     const { parseProjectElementList } = await loader();
     const digest = 'b'.repeat(64);
@@ -187,6 +200,20 @@ describe('reading the project list', () => {
 });
 
 describe('importing one admitted bundle', () => {
+  it('surfaces only the known pre-release binding refusal from the selected asset', async () => {
+    const { importProjectElement } = await loader();
+    const reason = 'This project element was admitted by a pre-release build. Change its component source, admit the element again, then place the new revision on the clip.';
+    const entry = entryFor(digestOf(COMPONENT_SOURCE));
+    const importModule = vi.fn();
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ details: { reason: 'project_element_binding_missing' }, message: 'untrusted' }), { status: 409 }));
+    await expect(importProjectElement(entry, new AbortController().signal, importModule)).rejects.toThrow(reason);
+    expect(importModule).not.toHaveBeenCalled();
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ details: { reason: 'other' }, message: reason }), { status: 409 }));
+    await expect(importProjectElement(entry, new AbortController().signal, importModule)).rejects.toThrow('could not be read from the Runtime');
+    fetchMock.mockResolvedValueOnce({ ok: false, redirected: true, status: 409, json: vi.fn().mockResolvedValue({ details: { reason: 'project_element_binding_missing' } }) });
+    await expect(importProjectElement(entry, new AbortController().signal, importModule)).rejects.toThrow('could not be read from the Runtime');
+  });
+
   it('rejects bytes that do not match the digest the Runtime admitted, without importing them', async () => {
     const { importProjectElement } = await loader();
     const admitted = digestOf(COMPONENT_SOURCE);

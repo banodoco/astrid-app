@@ -312,13 +312,15 @@ export interface TimelineOriginalSaveBasis {
 
 /** Read during assembly only; a newer head cannot substitute for the displayed original. */
 export async function readTimelineOriginalSaveBasis(
-  provider: DataProvider, timelineId: string, input: TimelineSaveSource,
+  provider: DataProvider, timelineId: string, input: TimelineSaveSource, headOnly = false,
 ): Promise<TimelineOriginalSaveBasis> {
   const source = structuredClone(input);
   if (!provider.loadTimelineCommandBasis || source.head?.timelineId !== timelineId) {
     refuse('original verified authoring read is unavailable', 'original-read-unavailable');
   }
-  const initial = structuredClone(await provider.loadTimelineCommandBasis(timelineId));
+  const initial = structuredClone(await (headOnly
+    ? provider.loadTimelineCommandBasis(timelineId, { history: 'head' })
+    : provider.loadTimelineCommandBasis(timelineId)));
   checkHead(initial, source);
   // The existing carrier binds raw physical images and occurrence ownership.
   // It neither executes edits nor invents successor pins.
@@ -334,8 +336,13 @@ export function createTimelineLocalSaveHandoff(options: {
   session: LocalSaveSession;
   /** Read the upstream assembly after the session has adopted the complete canonical result. */
   loadHistory?(): Promise<TimelineCommandBasis>;
+  deferredHistory?: {
+    currentHead(): TimelineCommandBasis['head'] | undefined;
+    read(head: TimelineCommandBasis['head']): Promise<HistoryPage | undefined>;
+    changed(): void;
+  };
   adopted(basis: TimelineCommandBasis): { receipt: TimelineSaveReceipt; source: TimelineSaveSource };
-}): TimelineLocalSaveHandoff {
+}) {
   checkHead(options.initial, options.source);
   let initial = structuredClone(options.initial);
   let source = structuredClone(options.source);
@@ -343,7 +350,34 @@ export function createTimelineLocalSaveHandoff(options: {
   let document = structuredClone(options.initial.canonicalDocument);
   let sourceChecked = false;
   let targets = historyTargets(options.initial.history, options.initial.head, options.session.actorId);
+  let targetsHead = options.deferredHistory && !options.initial.history ? undefined : options.initial.head;
+  let pendingHistoryHead: TimelineCommandBasis['head'] | undefined;
   let inversePending = false;
+
+  function installHistory(history: HistoryPage | undefined, head: TimelineCommandBasis['head']): boolean {
+    if (options.deferredHistory && !same(head, options.deferredHistory.currentHead())) return false;
+    targets = historyTargets(history, head, options.session.actorId);
+    targetsHead = head;
+    return true;
+  }
+
+  async function refreshDeferredHistory() {
+    const deferred = options.deferredHistory;
+    const head = deferred?.currentHead();
+    if (!deferred || !head || same(head, targetsHead) || same(head, pendingHistoryHead)) return;
+    pendingHistoryHead = head;
+    try {
+      // Let the mounted editor publish readiness before starting the history walk.
+      await new Promise<void>(resolve => setTimeout(resolve, 0));
+      if (!same(head, deferred.currentHead()) || same(head, targetsHead)) return;
+      const history = await deferred.read(head);
+      if (history && installHistory(history, head)) deferred.changed();
+    } catch {
+      // A failed history read leaves Undo/Redo unavailable and preserves the verified editor basis.
+    } finally {
+      if (pendingHistoryHead === head) pendingHistoryHead = undefined;
+    }
+  }
 
   async function appendInverse(kind: 'undo' | 'redo'): Promise<void> {
     if (!remoteHistoryAvailable()) refuse('durable timeline history is not settled');
@@ -367,7 +401,8 @@ export function createTimelineLocalSaveHandoff(options: {
   }
 
   function remoteHistoryAvailable(): boolean {
-    return !inversePending && options.session.getState().status === 'saved';
+    return !inversePending && options.session.getState().status === 'saved'
+      && (!options.deferredHistory || (targetsHead !== undefined && same(targetsHead, options.deferredHistory.currentHead())));
   }
   function changes(raw: unknown, previous: unknown, next: unknown, path: string[], element = false): unknown {
     if (same(previous, next)) return structuredClone(raw);
@@ -478,7 +513,7 @@ export function createTimelineLocalSaveHandoff(options: {
     }
     return baseline;
   }
-  const handoff: TimelineLocalSaveHandoff = {
+  const handoff = {
     capture(input, inputGestureBasis) {
       try {
         const next = structuredClone(input);
@@ -1013,15 +1048,16 @@ export function createTimelineLocalSaveHandoff(options: {
         if (head.projectId !== initial.canonicalDocument.project_id || head.timelineId !== initial.canonicalDocument.timeline_id
           || head.headRevisionId !== basis.head.revisionId || head.headPublicationId !== basis.head.publicationId
           || !same(adopted.source.head, head)) refuse('canonical assembly did not adopt the accepted head');
-        initial = structuredClone(basis);
+        const accepted = structuredClone(basis);
+        initial = accepted;
         source = structuredClone(adopted.source);
         authoringSource = structuredClone(adopted.source);
         document = structuredClone(basis.canonicalDocument);
         sourceChecked = false;
-        targets = historyTargets(basis.history, basis.head, options.session.actorId);
+        installHistory(basis.history, basis.head);
         if (options.loadHistory) {
           const latest = await options.loadHistory();
-          targets = historyTargets(same(latest.head, basis.head) ? latest.history : undefined, basis.head, options.session.actorId);
+          if (initial === accepted) installHistory(same(latest.head, basis.head) ? latest.history : undefined, basis.head);
         }
         return adopted.receipt;
       }
@@ -1049,11 +1085,20 @@ export function createTimelineLocalSaveHandoff(options: {
       authoringSource = structuredClone(source);
       sourceChecked = false;
     },
+    refreshDeferredHistory,
+    adoptVerifiedHistory(basis: TimelineCommandBasis) {
+      if (!options.deferredHistory) return;
+      if (basis.history) installHistory(basis.history, basis.head);
+      else void refreshDeferredHistory();
+    },
     remoteHistoryAvailable,
     canUndo: () => remoteHistoryAvailable() && targets.undo.length > 0,
     canRedo: () => remoteHistoryAvailable() && targets.redo.length > 0,
     undo: () => appendInverse('undo'),
     redo: () => appendInverse('redo'),
+  } satisfies TimelineLocalSaveHandoff & {
+    refreshDeferredHistory(): Promise<void>;
+    adoptVerifiedHistory(basis: TimelineCommandBasis): void;
   };
   return handoff;
 }

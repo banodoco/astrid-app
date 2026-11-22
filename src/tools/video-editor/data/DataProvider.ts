@@ -458,7 +458,10 @@ export interface ExtensionPersistenceService {
 export interface DataProvider extends AssetResolver {
   /** Command commits are supplied whole by gesture/command producers. */
   timelineCommands?: TimelineCommitCapability;
-  loadTimelineCommandBasis?(timelineId: string): Promise<TimelineCommandBasis>;
+  /** Editor assembly can request the verified head and immutable closure before complete history. */
+  loadTimelineCommandBasis?(timelineId: string, options?: { history: 'head' }): Promise<TimelineCommandBasis>;
+  /** @internal Full commit history only when it matches the editor's accepted head. */
+  loadTimelineCommandHistory?(timelineId: string, expectedHead: TimelineAcceptedIdentity): Promise<HistoryPage | undefined>;
   resolveTimelineCommandAsset?(file: string, registry: AssetRegistry): Promise<string>;
   commitTimeline?(request: CommitRequest, idempotencyKey: string): Promise<TimelineCommitResult>;
   undoTimeline?(base: TimelineHeadRevision, publications: readonly string[], idempotencyKey: string): Promise<TimelineCommitResult>;

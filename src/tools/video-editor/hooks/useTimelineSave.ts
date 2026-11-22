@@ -325,6 +325,9 @@ export function useTimelineSave(
       return;
     }
     setOriginalLocalSaveBasis({ status: 'loading' });
+    const loadCommandHistory = usesLocalDocumentSave && bootstrapEpoch === 0
+      ? provider.loadTimelineCommandHistory?.bind(provider)
+      : undefined;
     const readGeneration = localOwner.generation;
     const pending = pendingOriginalSaveReadRef.current;
     const samePendingRead = pending && !pending.settled
@@ -350,7 +353,7 @@ export function useTimelineSave(
           schema_version: 1, itemsBySchemaRef: persistedTranscriptItems(original.sourceItemsBySchemaRef),
           ...(original.transcriptReferences ? { transcriptReferences: original.transcriptReferences } : {}),
         } } : {}),
-      }));
+      }, Boolean(loadCommandHistory)));
       const record: PendingOriginalSaveRead = { provider, timelineId, headKey: originalHeadKey, original, editSeq,
         readOrdinal, promise: originalRead, settled: false };
       pendingOriginalSaveReadRef.current = record;
@@ -392,6 +395,7 @@ export function useTimelineSave(
         await previousDisposal;
         if (!isCurrent()) throw markTimelineSaveRejection(new Error('Local save session replaced during owner retirement'), 'owner-retirement-invalidated', 'Error');
         let adoptedSource = structuredClone(verified.source);
+        let adoptVerifiedHistory: ReturnType<typeof createTimelineLocalSaveHandoff>['adoptVerifiedHistory'] | undefined;
         sessionCreation = createLocalSaveSession({
           scope: { ...identity, projectId: verified.initial.canonicalDocument.project_id, timelineId },
           initial: verified.initial, document: toOutboxJson(verified.initial.canonicalDocument),
@@ -427,6 +431,7 @@ export function useTimelineSave(
               localOwner.headKey = canonicalJsonStringify(head);
               headRevisionRef.current = head;
               adoptCanonicalData(next, { save: false, skipHistory: true, updateLastSavedSignature: true });
+              if (!draft) adoptVerifiedHistory?.(basis);
               emitTimelineSaveDiagnostic('adoption-complete', () => ({ owner: localOwner, timelineId,
                 mounted: localDataRef.current, source, current: isCurrent(), generation }));
             } };
@@ -460,6 +465,20 @@ export function useTimelineSave(
         if (!isCurrent()) throw markTimelineSaveRejection(new Error('Local save session replaced during history read'), 'owner-history-invalidated', 'Error');
         const handoff = createTimelineLocalSaveHandoff({ initial, source: adoptedSource, session,
           loadHistory: () => provider.loadTimelineCommandBasis!(timelineId),
+          deferredHistory: loadCommandHistory && {
+            read: head => loadCommandHistory(timelineId, head),
+            currentHead: () => {
+              const head = localDataRef.current?.head;
+              const accepted = adoptedSource.head;
+              if (!isCurrent() || !head?.headRevisionId || !head.headPublicationId || !accepted
+                || head.projectId !== accepted.projectId || head.timelineId !== accepted.timelineId
+                || head.headRevisionId !== accepted.headRevisionId || head.headPublicationId !== accepted.headPublicationId) {
+                return undefined;
+              }
+              return { revisionId: head.headRevisionId, publicationId: head.headPublicationId };
+            },
+            changed: () => setLocalSaveState(current => current ? { ...current } : current),
+          },
           adopted: () => {
             emitTimelineSaveDiagnostic('adopted-read', () => ({ owner: localOwner, timelineId,
               mounted: localDataRef.current, source: adoptedSource, basis: verified,
@@ -467,12 +486,14 @@ export function useTimelineSave(
             return { source: adoptedSource,
               receipt: { configVersion: configVersionRef.current, head: adoptedSource.head! } };
           } });
+        adoptVerifiedHistory = handoff.adoptVerifiedHistory;
         localOwner.handoff = handoff;
         localOwner.initialization = 'ready';
         emitTimelineSaveDiagnostic('handoff-ready', () => ({ owner: localOwner, timelineId,
           basis: verified, basisStatus: 'ready', current: isCurrent(), generation, sessionPresent: Boolean(localOwner.session),
           mounted: localDataRef.current }));
         setLocalSaveState((current) => current ? { ...current } : current);
+        if (!owners.length) void handoff.refreshDeferredHistory();
         return handoff;
       })();
       void localOwner.ready.catch((error: unknown) => {

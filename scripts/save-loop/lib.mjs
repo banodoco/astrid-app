@@ -129,6 +129,8 @@ export async function open({onCleanup, fixture, onOpening, reducedOpening = fals
       const observe=request=>{if(request.method()==='POST' && request.url().includes('/api/runtime/')) posts.push(request.url().replace(/.*\/api\//,''));};
       p.on('request',observe);
       const navigation=warm ? p.reload({waitUntil:'domcontentloaded', timeout:startup.remaining()}) : p.goto(URL_, {waitUntil:'domcontentloaded', timeout:startup.remaining()});
+      // Warm DOM observers must attach only after the reloaded document is ready.
+      if (warm) await navigation;
       const selector=`.clip-action[data-clip-id="${target.clip_id}"][data-row-id="${target.track_id}"]`;
       const first15=(async()=>{
         try {

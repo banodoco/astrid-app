@@ -11,6 +11,9 @@ import path from 'path';
 import {fileURLToPath} from 'url';
 import {spawn, execFileSync} from 'child_process';
 import {once} from 'events';
+import {performance} from 'node:perf_hooks';
+import {createCpuSampler, runtimeRoot} from './cpu.mjs';
+import {expectedFixtureIds, sameIds} from './readiness.mjs';
 const {chromium}=await import(process.env.SAVE_LOOP_PLAYWRIGHT||'playwright');
 function need(name){ const v=process.env[name]; if(!v){ throw new Error(`missing env ${name} (see scripts/save-loop/lib.mjs header or run sweep.mjs --help)`); } return v; }
 const CHROME=need('SAVE_LOOP_CHROME');
@@ -33,12 +36,13 @@ async function exitedWithin(proc, ms) {
     delay(ms).then(() => false),
   ]);
 }
-export async function open({onCleanup} = {}){
+export async function open({onCleanup, fixture, onOpening} = {}){
   checkDisk();
   const browserScratch=fs.mkdtempSync(path.join('/tmp','sl-'));
   const profile=browserScratch;
-  let proc, browser;
+  let proc, browser, cpu;
   async function close(){
+    cpu?.close();
     try {
       if (browser) {
         await Promise.race([
@@ -76,10 +80,56 @@ export async function open({onCleanup} = {}){
     const ev=[]; p.__ev=ev;
     p.on('request',r=>{ if(r.method()==='POST'&&!/handshake|local-update|inspect|acp|chat/.test(r.url())) r.__t=Date.now(); });
     p.on('response',async r=>{ const q=r.request(); if(q.method()==='POST'&&!/handshake|local-update|inspect|acp|chat/.test(r.url())){ let body=''; if(/commit/.test(r.url())){try{body=(await r.text()).slice(0,400)}catch{}} ev.push({t:Date.now(),requestTime:q.__t,url:r.url().replace(/.*\/api\//,''),status:r.status(),body}); }});
-    await p.goto(URL_);
-    await p.waitForFunction(()=>[...document.querySelectorAll('div')].some(e=>e.children.length===0&&/^saved$/i.test(e.textContent||'')),null,{timeout:60000});
+    let opening;
+    if (fixture) {
+      const expected = expectedFixtureIds(fixture);
+      const tracks = [...(fixture.tracks?.visual ?? []), ...(fixture.tracks?.audio ?? [])].map(t=>t.id);
+      if (tracks.length !== 9 || new Set(tracks).size !== 9) throw new Error('fixture must have nine distinct tracks');
+      const target = fixture.clips?.audio?.primary || fixture.clips?.video?.primary;
+      if (!target?.clip_id || !target?.track_id) throw new Error('fixture lacks a selection target');
+      if (!process.env.SAVE_LOOP_ROOT) throw new Error('SAVE_LOOP_ROOT required for owned Runtime CPU identity');
+      const browserStat = (await import('./cpu.mjs')).parseStat(fs.readFileSync(`/proc/${proc.pid}/stat`, 'utf8'));
+      cpu = createCpuSampler(runtimeRoot(process.env.SAVE_LOOP_ROOT), {pid:proc.pid,start:browserStat.start});
+      const cpuStart=cpu.mark(), start=performance.now();
+      const posts=[];
+      const observe=request=>{if(request.method()==='POST' && request.url().includes('/api/runtime/')) posts.push(request.url().replace(/.*\/api\//,''));};
+      p.on('request',observe);
+      const navigation=p.goto(URL_, {waitUntil:'domcontentloaded'});
+      const selector=`.clip-action[data-clip-id="${target.clip_id}"][data-row-id="${target.track_id}"]`;
+      const selection=(async()=>{
+        try {
+          const control=p.locator(selector).first();
+          await control.waitFor({state:'visible', timeout:300000});
+          const visible=performance.now()-start;
+          const selectedBefore=await control.getAttribute('data-selected');
+          const countBefore=posts.length;
+          await control.press('Enter');
+          await p.waitForFunction(sel=>document.querySelector(sel)?.getAttribute('data-selected')==='true',selector,{timeout:10000});
+          return {visible_ms:visible, selection_ms:performance.now()-start, selected_before:selectedBefore, selection_transition_proven:selectedBefore !== 'true', runtime_posts_during_selection:posts.length-countBefore, limitation:'Selection only; first 15 seconds rendered, editable state, and unchanged public head are not established.'};
+        } catch(error) {return {selection_ms:null, error:String(error.message), limitation:'Selection and first 15 seconds editable are not established.'};}
+      })();
+      await navigation;
+      const {publicSnapshot} = await import('./assert.mjs');
+      const headBefore = await publicSnapshot(p, process.env.SAVE_LOOP_BASE_URL, fixture);
+      if (!sameIds(headBefore.clipIds, expected)) throw new Error('opening public head clip IDs do not match fixture');
+      let full=null;
+      const deadline=performance.now()+300000;
+      while(performance.now()<deadline) {
+        const state=await p.evaluate(()=>({project:new URL(location.href).searchParams.get('project'), timeline:new URL(location.href).searchParams.get('timeline'), ids:[...document.querySelectorAll('.clip-action[data-clip-id][data-row-id]')].map(e=>e.getAttribute('data-clip-id')), tracks:[...new Set([...document.querySelectorAll('[data-row-id]')].map(e=>e.getAttribute('data-row-id')))], saved:[...document.querySelectorAll('div,span,button')].some(e=>e.children.length===0&&/^saved$/i.test((e.textContent||'').trim()))}));
+        if (state.project===fixture.project_id && state.timeline===fixture.timeline_id && state.saved && sameIds(state.ids,expected) && tracks.every(id=>state.tracks.includes(id))) {full={ui_saved_ms:performance.now()-start,cpu:cpu.delta(cpuStart,'opening_to_full_ui_saved')}; break;}
+        await p.waitForTimeout(250);
+      }
+      if (!full) opening = {cpu:cpu.delta(cpuStart,'opening_until_full_ui_timeout')};
+      const selected=await selection;
+      p.off('request',observe);
+      opening={type:'opening', selection:selected, full_ui_saved:full, head_before_ui:{revision:headBefore.headRevision,publication:headBefore.publicationId}, timeout_cpu:opening?.cpu ?? null, limitation:full ? 'Public head identity and exact IDs must be confirmed before this is a full-open claim.' : 'Full UI was not proven; the timeline may virtualize offscreen controls.', target_first_usable_ms:5000,target_full_open_ms:15000};
+    } else {
+      await p.goto(URL_);
+      await p.waitForFunction(()=>[...document.querySelectorAll('div')].some(e=>e.children.length===0&&/^saved$/i.test(e.textContent||'')),null,{timeout:60000});
+    }
     await p.waitForTimeout(15000);
-    return {b:{close},p,ev,context:ctx};
+    if (opening) { opening.stability_delay_ms=15000; if (onOpening) onOpening(opening); }
+    return {b:{close},p,ev,context:ctx,cpu,opening};
   } catch(error) {
     try { await close(); }
     catch(cleanupError) {

@@ -1472,6 +1472,7 @@ async function prepareAfterAckLossMountedDocuments(page: Page, harness: DirectHa
   await harness.enableTimelineAuthoring(ASTRID_PYTHON);
   const wire = await faultFirstCommit(page);
   await openCommandTimeline(page, harness, seed);
+  await expect(page.locator('[data-save-bar]')).toHaveCount(0, CEILING);
   const before = await history(harness, seed);
   await dragTimelineClip(page, seed.appClipId, seed.transitionClipId, 0, 5, THREE_PRODUCTS_REFERENCE_AT, () => {
     expect(wire.attempts, 'pointer movement previews; the actual drop commits').toBe(0);
@@ -1776,6 +1777,8 @@ test('M2 real gate 5 (M1 real mounted path): Agent edit, lost ACK, newer local g
   const reset = await resetResponse;
   expect(reset.status(), await reset.text()).toBe(200);
   await expect.poll(async () => (await commandOutboxes(page, seed3.timelineId)).every((item) => !item.pending && !item.intents.length), CEILING).toBe(true);
+  // REVIEW: the outbox settles before the editor's asynchronous ACK cleanup clears the recovery slot.
+  await expect.poll(() => timelineDraft(page, seed3.timelineId), { ...CEILING, message: 'the reset must clear its mounted recovery draft before reopening' }).toBeNull();
   const { wire, before, a, owner } = await prepareAfterAckLossMountedDocuments(page, harness, seed3, async (acceptedA, commandWire) => {
     c = await astrid.commitCaptured(harness.seed.projectId, seed3.timelineId, pinOf(acceptedA),
       { kind: 'track', id: 'f2-gate5-independent-C' }, 'f2-gate5-independent-C');

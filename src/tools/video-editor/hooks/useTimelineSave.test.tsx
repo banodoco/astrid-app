@@ -2058,6 +2058,134 @@ describe('useTimelineSave — recovered draft durability', () => {
   });
 });
 
+describe('useTimelineSave with deferred Runtime history', () => {
+  it.each(['complete ancestry', 'history unavailable', 'superseded by an accepted save'] as const)(
+    'enables editing before full history (%s)', async outcome => {
+      resetFakeIndexedDB();
+      vi.stubGlobal('indexedDB', createFakeIndexedDB());
+      const lockDescriptor = Object.getOwnPropertyDescriptor(navigator, 'locks');
+      Object.defineProperty(navigator, 'locks', { configurable: true, value: {
+        request: async (_name: string, _options: unknown, work: (lock: object) => Promise<unknown>) => work({}),
+      } });
+      const scope = { projectId: 'project-commit', timelineId: 'timeline-1', realmId: 'realm', actorId: 'actor' };
+      const config = createDefaultTimelineConfig();
+      const edited = { ...config, output: { ...config.output, file: 'confirmed.mp4' } };
+      const pin = (n: number) => ({ revision_id: `r${n}`, publication_id: `p${n}` });
+      const responses = [0, 1, 2, 3].map(n => {
+        const result = acceptedCommit(pin(n), pin(Math.max(0, n - 1)), scope);
+        const document = result.data.canonical_document;
+        document.parent_revision.payload = { config: n === 3 ? edited : config, registry: { assets: {} }, clips: [], occurrences: [] };
+        document.parent_revision.content_digest = fixtureDigest(document.parent_revision.payload);
+        result.data.document_digest = fixtureDigest(document);
+        return result;
+      });
+      const historyEntries = responses.map((response, n): HistoryEntry => ({
+        ...pin(n), previous: n === 0 ? null : pin(n - 1), receipt: response.receipt,
+        intent: n === 0 ? 'bootstrap' : n === 3 ? 'legacy_unknown' : 'recorded',
+        records: n === 1 || n === 2
+          ? { schema_version: 1, commands: [], undo_of: [], undo_steps: null, restored_from: null }
+          : null,
+        publisher: n === 2 ? 'agent' : scope.actorId,
+        provider_version: response.data.provider_version, compiler_version: response.data.compiler_version,
+      }));
+      let current = 2;
+      let releaseHistory!: () => void;
+      const historyGate = new Promise<void>(resolve => { releaseHistory = resolve; });
+      const fixture = runtimeFixture();
+      const reads: string[] = [];
+      const posts: CommitRequest[] = [];
+      const runtime = new RuntimeDataProvider({ projectId: scope.projectId, transport: async (method, path, headers, body) => {
+        let value: unknown;
+        if (method === 'GET' && path.includes('/commits?')) {
+          const query = new URL(path, 'http://runtime.test').searchParams;
+          reads.push(query.toString());
+          if (query.get('limit') === '1') {
+            value = { head: pin(current), items: historyEntries.slice(0, 1), next_cursor: 'oldest' };
+          } else if (query.get('cursor') === 'full-tail') {
+            await historyGate;
+            if (outcome === 'history unavailable') {
+              return { status: 503, headers: {}, body: json({ code: 'unavailable', message: 'History unavailable' }) };
+            }
+            value = { head: pin(2), items: historyEntries.slice(2, 3), next_cursor: null };
+          } else if (current === 2) {
+            expect(query.has('cursor')).toBe(false);
+            value = { head: pin(2), items: historyEntries.slice(0, 2), next_cursor: 'full-tail' };
+          } else {
+            value = { head: pin(current), items: historyEntries, next_cursor: null };
+          }
+        } else if (method === 'GET' && path.includes('/composition-revisions/')) {
+          const revision = path.split('/').at(-1);
+          reads.push(revision!);
+          const document = responses.find(response => response.data.accepted_revision_id === revision)!.data.canonical_document;
+          value = { ...document.parent_revision, project_id: scope.projectId, timeline_id: scope.timelineId,
+            dependency_manifest: document.dependency_manifest };
+        } else if (method === 'POST' && path.endsWith('/commit')) {
+          const request = JSON.parse(new TextDecoder().decode(body)) as CommitRequest;
+          posts.push(request);
+          current = 3;
+          const response = responses[3];
+          response.receipt.idempotency_key = headers['Idempotency-Key'];
+          response.data.commands = request.commands;
+          response.data.steps = request.steps;
+          value = response;
+        } else return fixture.transport(method, path, headers, body);
+        return { status: 200, headers: {}, body: json(value) };
+      } });
+      const head = { projectId: scope.projectId, timelineId: scope.timelineId, headRevisionId: 'r2', headPublicationId: 'p2' };
+      const data = await buildTimelineData(config, { assets: {} }, undefined, 1, undefined, head);
+      const readHistory = vi.fn(runtime.loadTimelineCommandHistory.bind(runtime));
+      const harness = setup(async () => { throw new Error('Snapshot save refused by fixture'); }, undefined, { data,
+        loadBasis: runtime.loadTimelineCommandBasis.bind(runtime), capabilities: {
+          loadTimelineCommandHistory: readHistory, commitTimeline: runtime.commitTimeline.bind(runtime),
+          getRecoverableIdentity: async () => scope,
+        } });
+      try {
+        await vi.waitFor(() => expect(reads).toEqual(['limit=1', 'r2', 'limit=50', 'limit=50&cursor=full-tail']));
+        expect(harness.hook.result.current.timelineEditingReady).toBe(true);
+        expect(harness.hook.result.current.history.canUndo).toBe(false);
+        expect(harness.hook.result.current.history.canRedo).toBe(false);
+        expect(readHistory).toHaveBeenCalledExactlyOnceWith(scope.timelineId, { revisionId: 'r2', publicationId: 'p2' });
+
+        if (outcome === 'superseded by an accepted save') {
+          const next = await buildTimelineData(edited, { assets: {} }, undefined, 1, undefined, head);
+          await act(async () => {
+            harness.hook.result.current.commitData(next, { save: true });
+            await harness.hook.result.current.flushPendingSave();
+          });
+          expect(posts).toHaveLength(1);
+          expect(posts[0]).toMatchObject({ base_revision_id: 'r2', base_publication_id: 'p2' });
+          expect(harness.hook.result.current.dataRef.current?.head?.headPublicationId).toBe('p3');
+          expect(reads.slice(4)).toEqual(['limit=50', 'r3']);
+        }
+
+        await act(async () => {
+          releaseHistory();
+          const read = readHistory.mock.results[0].value;
+          if (outcome === 'history unavailable') await expect(read).rejects.toThrow('History unavailable');
+          else await read;
+        });
+        expect(harness.hook.result.current.timelineEditingReady).toBe(true);
+        expect(harness.hook.result.current.history.canUndo).toBe(outcome === 'complete ancestry');
+        expect(harness.hook.result.current.history.canRedo).toBe(false);
+        if (outcome === 'complete ancestry') {
+          act(() => harness.hook.result.current.history.undo());
+          await vi.waitFor(() => expect(posts[0]).toMatchObject({
+            base_revision_id: 'r2', base_publication_id: 'p2',
+            commands: [{ op: 'timeline.inverse', args: { publications: ['p1'] } }],
+          }));
+          await vi.waitFor(() => expect(harness.hook.result.current.localSaveState?.status).toBe('saved'));
+        }
+        expect(harness.saveTimeline).not.toHaveBeenCalled();
+      } finally {
+        releaseHistory();
+        harness.hook.unmount();
+        if (lockDescriptor) Object.defineProperty(navigator, 'locks', lockDescriptor);
+        else Reflect.deleteProperty(navigator, 'locks');
+        vi.unstubAllGlobals();
+      }
+    });
+});
+
 describe('useTimelineSave mounted save diagnostics', () => {
   beforeEach(() => {
     vi.useFakeTimers();

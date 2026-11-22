@@ -107,6 +107,9 @@ describe('page transition readiness signal', () => {
       start.mockImplementationOnce(() => { throw new Error('unavailable'); });
       act(() => hook.result.current.run(() => {}, 'vision'));
       expect(navigation.hasPendingPublicAstridPageTransition()).toBe(false);
+      start.mockImplementationOnce(() => { throw new Error('unavailable'); });
+      expect(() => act(() => hook.result.current.run(() => { throw new Error('commit failed'); }, 'vision'))).toThrow('commit failed');
+      expect(navigation.hasPendingPublicAstridPageTransition()).toBe(false);
       Object.defineProperty(document, 'startViewTransition', { configurable: true, value: undefined });
       const commit = vi.fn();
       act(() => hook.result.current.run(commit, 'vision'));

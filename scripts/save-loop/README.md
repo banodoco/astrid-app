@@ -67,8 +67,11 @@ close; that helper uses the App's shipped public snapshot, runtime identity and
 fixture-ID utilities. Set `P77_PROFILE_RUNTIME=1` to record py-spy stacks;
 rank a resulting profile record from the App checkout root with
 `python3 scripts/save-loop/diagnostics/rank-runtime-profile.py RESULT.json`.
-The raw trace must remain adjacent as `RESULT.json.py-spy.raw` and match its
-sample receipt. Invoke it with explicit owned output paths:
+The raw trace must remain adjacent as `RESULT.json.py-spy.raw`. The strict
+ranker checks its sample receipt. The nonblocking recovery ranker,
+`scripts/save-loop/diagnostics/rank-decoded-runtime-profile.py`, ranks
+decodable weighted records and reports acquisition, decoding and count
+gaps alongside the original raw file hash. Invoke it with explicit owned output paths:
 
 ```sh
 P77_PROFILE_RUNTIME=1 \

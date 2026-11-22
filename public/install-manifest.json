@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "release": 15,
+  "release": 14,
   "agent": {
     "sha": "caafac7841496c7baed61f309d0ba55d55ca9af7"
   },
@@ -122,7 +122,7 @@
     "version": "0.3.1.dev0"
   },
   "required": {
-    "release": 15,
+    "release": 14,
     "reason": "This update fixes problems that could keep a rented machine billing after a job, or lose a finished result."
   }
 }

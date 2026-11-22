@@ -42,7 +42,8 @@ const baseUrl = process.env.SAVE_LOOP_BASE_URL;
 const origin = new URL(baseUrl);
 if (!['localhost','127.0.0.1','[::1]'].includes(origin.hostname)) throw new Error('save-loop requires a local isolated stack');
 const helpers = await import('./lib.mjs');
-const {createRecorder} = await import('./assert.mjs');
+const {createRecorder, publicSnapshot} = await import('./assert.mjs');
+const {expectedFixtureIds, sameIds} = await import('./readiness.mjs');
 let browser;
 for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]]) {
   process.once(signal, async () => {
@@ -52,7 +53,7 @@ for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]]) {
 let failed = false;
 const rows = [];
 try {
-  const {b, p: page, context} = await helpers.open({onCleanup: close => { browser = {close}; }});
+  const {b, p: page, context, cpu, opening} = await helpers.open({fixture:probeOnly ? undefined : fixture, onCleanup: close => { browser = {close}; }});
   browser = b;
   let secondPage;
   const project = await page.evaluate(async projectId => {
@@ -63,6 +64,19 @@ try {
   if (project.project_id !== fixture.project_id || project.metadata?.purpose !== 'synthetic Plan 77 save-loop fixture')
     throw new Error('project is not the synthetic Plan 77 sandbox fixture');
   fs.appendFileSync(resultsPath, JSON.stringify({type:'run', date:new Date().toISOString(), versions, project_id:fixture.project_id, timeline_id:fixture.timeline_id, manifest:manifestPath}) + '\n');
+  if (opening) {
+    const head = await publicSnapshot(page, baseUrl, fixture);
+    const idsMatch = sameIds(head.clipIds, expectedFixtureIds(fixture));
+    opening.public_head = {project_id:head.project_id, timeline_id:head.timeline_id, revision:head.headRevision, publication:head.publicationId, exact_clip_ids:idsMatch};
+    opening.full_ui_and_public_head_match = Boolean(opening.full_ui_saved && idsMatch && opening.head_before_ui.revision === head.headRevision && opening.head_before_ui.publication === head.publicationId);
+    opening.full_open_corroborated = opening.full_ui_and_public_head_match;
+    opening.full_open_ms = opening.full_open_corroborated ? opening.full_ui_saved.ui_saved_ms : null;
+    opening.full_open_target_pass = opening.full_open_ms === null ? null : opening.full_open_ms <= opening.target_full_open_ms;
+    opening.full_open_confirmed = false;
+    opening.limitation = opening.full_open_corroborated ? 'Exact UI IDs and tracks with sampled stable Saved agree with an unchanged public head and exact clip IDs. The editor does not independently expose its rendered head identity.' : opening.limitation + ' The editor does not independently expose its rendered head identity.';
+    fs.appendFileSync(resultsPath, JSON.stringify(opening)+'\n');
+    if (!idsMatch) throw new Error('public head clip IDs do not match expected fixture');
+  }
   const recorder = await createRecorder(page, {fixture, baseUrl, resultsPath, allowEmpty:probeOnly});
   let descriptors = [];
   if (!probeOnly) {
@@ -84,6 +98,7 @@ try {
     name:'deliberately broken no-op probe', expected:'saved', timeoutMs:1000,
     gesture:async()=>{}, cleanup:context=>context.helpers.restoreScenario(context),
   });
+  let firstAcceptedReported = false;
   for (const descriptor of descriptors) {
     if (!descriptor || typeof descriptor.name !== 'string' || typeof descriptor.gesture !== 'function' ||
         !['saved','clash'].includes(descriptor.expected) || typeof descriptor.cleanup !== 'function') {
@@ -92,6 +107,7 @@ try {
     const measurements = [];
     for (let iteration=1; iteration<=3; iteration++) {
       let row;
+      const scenarioStart=cpu?.mark();
       try {
         row = await recorder.runRow({...descriptor, iteration});
         row = {...row, name:descriptor.name, iteration};
@@ -105,11 +121,17 @@ try {
         measurements.push(row);
         fs.appendFileSync(resultsPath, JSON.stringify({type:'row', ...row}) + '\n');
       }
+      if (cpu) fs.appendFileSync(resultsPath, JSON.stringify({type:'cpu', name:descriptor.name, iteration, ...cpu.delta(scenarioStart,'scenario')})+'\n');
+      const cleanupStart=cpu?.mark();
       try {
         const cleanup = await descriptor.cleanup({page, secondPage, fixture, helpers, result:row});
-        fs.appendFileSync(resultsPath, JSON.stringify({type:'cleanup', name:descriptor.name, iteration, result:cleanup ?? null}) + '\n');
+        fs.appendFileSync(resultsPath, JSON.stringify({type:'cleanup', name:descriptor.name, iteration, result:cleanup ?? null, cpu:cpu?.delta(cleanupStart,'cleanup') ?? null}) + '\n');
+        if (!firstAcceptedReported && descriptor.expected === 'saved' && row?.pass === true && cleanup?.changed === true) {
+          fs.appendFileSync(resultsPath, JSON.stringify({type:'first_accepted_scenario', name:descriptor.name, iteration, gesture_to_saved_ms:row.ms, restored_content_verified:true, limitation:'Ordinary matrix row after opening; not part of cold-open timing or CPU.'})+'\n');
+          firstAcceptedReported = true;
+        }
       } catch (error) {
-        const failure = {type:'cleanup_failure', name:descriptor.name, iteration, error:String(error?.message || error)};
+        const failure = {type:'cleanup_failure', name:descriptor.name, iteration, error:String(error?.message || error), cpu:cpu?.delta(cleanupStart,'cleanup') ?? null};
         fs.appendFileSync(resultsPath, JSON.stringify(failure) + '\n');
         throw new Error(`cleanup failed for ${descriptor.name}: ${failure.error}`);
       }

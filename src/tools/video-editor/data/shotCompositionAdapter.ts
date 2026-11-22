@@ -59,6 +59,8 @@ export type ShotCompositionHistoryRequest = ShotCompositionReadRequest;
 
 export type ShotCompositionHistoryRestoreRequest = ShotCompositionReadRequest & Readonly<{
   revisionId: string;
+  /** The publication the user reviewed. Required by Runtime-backed restores. */
+  reviewedHead?: Readonly<{ revisionId: string; publicationId: string }>;
 }>;
 
 export type ShotCompositionHistoryRestoreReceipt = Readonly<{

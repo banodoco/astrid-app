@@ -704,7 +704,7 @@ describe('RuntimeDataProvider', () => {
     expect(transport).not.toHaveBeenCalled();
   });
 
-  it('preserves Runtime 409 when the head moves after preflight without refreshing or falling back', async () => {
+  it('preserves Runtime 409 for a stale restore pair without refreshing or falling back', async () => {
     const fixture = runtimeFixture();
     const requests: Array<{ method: string; path: string; body?: unknown }> = [];
     let current = restoreHeadResource();

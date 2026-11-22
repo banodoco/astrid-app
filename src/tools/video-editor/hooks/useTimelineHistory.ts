@@ -23,7 +23,7 @@ import type {
   UndoEntry,
   UndoSnapshot,
 } from '@/tools/video-editor/types/history.ts';
-import type { CanonicalShotCompositionHistoryEntry } from '@/tools/video-editor/data/shotCompositionAdapter.ts';
+import type { CanonicalShotCompositionHistoryEntry, ShotCompositionHistoryRestoreRequest } from '@/tools/video-editor/data/shotCompositionAdapter.ts';
 import type { TimelineLocalSaveHandoff } from './timelineLocalSaveHandoff.ts';
 
 const UNDO_STACK_LIMIT = 100;
@@ -139,8 +139,11 @@ export function useTimelineHistory({
   const [restoringCanonicalRevisionId, setRestoringCanonicalRevisionId] = useState<string | null>(null);
   const canonicalHistoryRequestRef = useRef(0);
   const historyActionPendingRef = useRef(false);
-  const canonicalHistoryBasisRef = useRef<TimelineData | null>(null);
-  const canonicalHistoryFingerprintRef = useRef<string | null>(null);
+  const canonicalHistoryBasisRef = useRef<{
+    data: TimelineData | null;
+    fingerprint: string | null;
+    reviewedHead: ShotCompositionHistoryRestoreRequest['reviewedHead'];
+  } | null>(null);
   const canonicalHistorySupported = Boolean(provider.shotComposition?.listHistory && provider.shotComposition?.restoreHistory);
 
   const syncHistoryState = useCallback(() => {
@@ -521,23 +524,28 @@ export function useTimelineHistory({
 
     const basis = dataRef.current;
     const fingerprint = historyBasis(basis);
+    const head = basis?.head;
+    const capturedHead = head?.projectId === historyProjectId && head.timelineId === timelineId
+      && head.headRevisionId && head.headPublicationId
+      ? { revisionId: head.headRevisionId, publicationId: head.headPublicationId }
+      : undefined;
     canonicalHistoryBasisRef.current = null;
-    canonicalHistoryFingerprintRef.current = null;
     setCanonicalHistoryError(remoteHistory ? 'Loading timeline history…' : null);
     try {
       await remoteHistory?.refreshHistory?.();
       const entries = await listHistory({ projectId: historyProjectId, parentDocumentId: timelineId });
       if (requestId === canonicalHistoryRequestRef.current) {
+        const reviewedHead = capturedHead
+          && entries.some(entry => entry.isCurrentHead && entry.revisionId === capturedHead.revisionId)
+          ? capturedHead
+          : undefined;
         if (remoteHistory && (dataRef.current !== basis || historyBasis(dataRef.current) !== fingerprint
-          || !basis?.head?.headRevisionId || !basis.head.headPublicationId
-          || !remoteHistory.remoteHistoryAvailable()
-          || !entries.some(entry => entry.isCurrentHead && entry.revisionId === basis.head?.headRevisionId))) {
+          || !reviewedHead || !remoteHistory.remoteHistoryAvailable())) {
           setCanonicalHistory([]);
           setCanonicalHistoryError('Timeline changed while history was loading. Open history again.');
           return;
         }
-        canonicalHistoryBasisRef.current = basis;
-        canonicalHistoryFingerprintRef.current = fingerprint;
+        canonicalHistoryBasisRef.current = { data: basis, fingerprint, reviewedHead };
         setCanonicalHistory(entries);
         setCanonicalHistoryError(null);
       }
@@ -558,8 +566,9 @@ export function useTimelineHistory({
   const restoreCanonicalRevision = useCallback(async (revisionId: string) => {
     const restoreHistory = provider.shotComposition?.restoreHistory;
     if (!restoreHistory || !timelineId || !historyProjectId) return;
-    if (remoteHistory && (!canonicalHistoryBasisRef.current || canonicalHistoryBasisRef.current !== dataRef.current
-      || canonicalHistoryFingerprintRef.current !== historyBasis(dataRef.current)
+    const basis = canonicalHistoryBasisRef.current;
+    if (remoteHistory && (!basis || basis.data !== dataRef.current
+      || basis.fingerprint !== historyBasis(dataRef.current)
       || !remoteHistory.remoteHistoryAvailable() || !canonicalHistory.some(entry => entry.revisionId === revisionId))) {
       setCanonicalHistoryError('Load current timeline history before restoring a revision.');
       return;
@@ -573,7 +582,8 @@ export function useTimelineHistory({
     setCanonicalHistoryError(null);
     setRestoringCanonicalRevisionId(revisionId);
     try {
-      await restoreHistory({ projectId: historyProjectId, parentDocumentId: timelineId, revisionId });
+      await restoreHistory({ projectId: historyProjectId, parentDocumentId: timelineId, revisionId,
+        ...(basis?.reviewedHead ? { reviewedHead: basis.reviewedHead } : {}) });
       const entries = await provider.shotComposition?.listHistory?.({
         projectId: historyProjectId,
         parentDocumentId: timelineId,
@@ -601,9 +611,10 @@ export function useTimelineHistory({
     && remoteHistory?.canRequestHistory?.(dataRef.current.head) && remoteHistory.refreshHistory
     && !historyActionPendingRef.current && !historyPausedForUploads && !isInteractionActive(interactionStateRef)
     && (!editability?.checkTimeline || editability.checkTimeline().allowed));
-  const historyStale = Boolean(remoteHistory && canonicalHistoryBasisRef.current
-    && (canonicalHistoryBasisRef.current !== dataRef.current
-      || canonicalHistoryFingerprintRef.current !== historyBasis(dataRef.current)
+  const canonicalHistoryBasis = canonicalHistoryBasisRef.current;
+  const historyStale = Boolean(remoteHistory && canonicalHistoryBasis
+    && (canonicalHistoryBasis.data !== dataRef.current
+      || canonicalHistoryBasis.fingerprint !== historyBasis(dataRef.current)
       || !remoteHistory.remoteHistoryAvailable()));
 
   return {

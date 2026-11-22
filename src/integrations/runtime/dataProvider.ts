@@ -242,6 +242,10 @@ export class RuntimeDataProvider implements DataProvider {
       return entries;
     },
     restoreHistory: async (request) => {
+      const { revisionId: reviewedRevision, publicationId: reviewedPublication } = request.reviewedHead ?? {};
+      if (!reviewedRevision || !reviewedPublication) {
+        throw new ShotCompositionUnavailableError('Workspace Runtime requires a reviewed revision and publication to restore history. Open history again.');
+      }
       const timeline = await this.client.getProjectTimeline(request.projectId, request.parentDocumentId);
       assertRuntimeIdentity(timeline, request.projectId, request.parentDocumentId, 'timeline');
       const expectedHead = optionalNullableString(timeline.head_revision_id, 'timeline.head_revision_id');
@@ -249,12 +253,15 @@ export class RuntimeDataProvider implements DataProvider {
       if (!expectedHead || !expectedPublication) {
         throw new ShotCompositionUnavailableError('Workspace Runtime timeline requires a verified revision and publication before restoring history');
       }
+      if (expectedHead !== reviewedRevision || expectedPublication !== reviewedPublication) {
+        throw new ShotCompositionUnavailableError('Timeline changed since history was loaded. Open history again.');
+      }
       const restored = await this.client.restoreProjectParentCompositionRevision(
         request.projectId,
         request.parentDocumentId,
         request.revisionId,
-        expectedHead,
-        expectedPublication,
+        reviewedRevision,
+        reviewedPublication,
         generateUUID(),
       );
       // The ACK contains the exact restored closure, even if head has moved
@@ -514,6 +521,7 @@ export class RuntimeDataProvider implements DataProvider {
           listTimelineCommits: (project, timeline, cursor, limit) => this.client.listTimelineCommits(project, timeline, cursor, limit),
           getProjectParentCompositionRevision: (project, timeline, revision) =>
             this.client.getProjectParentCompositionRevision(project, timeline, revision),
+          loadHistoryBasis: (id) => this.loadTimelineCommandHistory(id),
           loadLatest: (id) => this.loadTimelineCommandBasis(id),
           commitTimeline: (request, key) => this.commitTimeline(request, key),
         },
@@ -531,6 +539,7 @@ export class RuntimeDataProvider implements DataProvider {
         listTimelineCommits: (project, timeline, cursor, limit) => this.client.listTimelineCommits(project, timeline, cursor, limit),
         getProjectParentCompositionRevision: (project, timeline, revision) =>
           this.client.getProjectParentCompositionRevision(project, timeline, revision),
+        loadHistoryBasis: (id) => this.loadTimelineCommandHistory(id),
         loadLatest: (id) => this.loadTimelineCommandBasis(id),
         commitTimeline: (request, key) => this.commitTimeline(request, key),
       },

@@ -15,6 +15,7 @@ export type BootstrapInitializationPorts = {
   createTimeline: WorkspaceClient['createTimeline'];
   listTimelineCommits: WorkspaceClient['listTimelineCommits'];
   getProjectParentCompositionRevision: WorkspaceClient['getProjectParentCompositionRevision'];
+  loadHistoryBasis(timelineId: string): Promise<TimelineCommandBasis>;
   loadLatest(timelineId: string): Promise<TimelineCommandBasis>;
   commitTimeline(request: CommitRequest, key: string): Promise<TimelineCommitResult>;
 };
@@ -148,7 +149,7 @@ export async function resumeBootstrapInitialization(box: ClaimedOutbox, ports: P
   }
   if (!record.initialization && !record.intents.length && record.accepted?.creation) {
     const created = record.accepted;
-    const basis = await ports.loadLatest(scope.timelineId);
+    const basis = await ports.loadHistoryBasis(scope.timelineId);
     const history = basis.history;
     const entry = history?.items[0];
     const document = basis.canonicalDocument;

@@ -45,6 +45,7 @@ function environment() {
     value: receipt('timeline.create', 'create-receipt', key, created), enumerable: false,
   }) as MutationResult<Record<string, unknown>>;
   const createTimeline = vi.fn(async (_project: string, _timeline: string, _key: string, _name?: string) => createResult());
+  const loadHistoryBasis = vi.fn(async () => structuredClone(basis));
   const loadLatest = vi.fn(async () => structuredClone(basis));
   const commitTimeline = vi.fn(async (body: CommitRequest, commitKey: string): Promise<TimelineCommitResult> => {
     const response = acceptedCommit({ revision_id: 'initialized', publication_id: 'init-p1' },
@@ -72,7 +73,7 @@ function environment() {
     return { project_id: saved.project_id, timeline_id: saved.timeline_id, ...structuredClone(saved.parent_revision),
       dependency_manifest: structuredClone(saved.dependency_manifest) };
   });
-  return { open, ports: { createTimeline, loadLatest, commitTimeline, listTimelineCommits, getProjectParentCompositionRevision }, createResult,
+  return { open, ports: { createTimeline, loadHistoryBasis, loadLatest, commitTimeline, listTimelineCommits, getProjectParentCompositionRevision }, createResult,
     setBasis: (next: TimelineCommandBasis) => { basis = next; } };
 }
 
@@ -535,7 +536,7 @@ describe('source-only create then native initialization', () => {
   it('retains create ACK/defaults if history loading crashes before capture, then resumes without another create', async () => {
     const env = environment();
     let owner = '';
-    env.ports.loadLatest.mockRejectedValueOnce(new Error('read interrupted'));
+    env.ports.loadHistoryBasis.mockRejectedValueOnce(new Error('read interrupted'));
     await env.open().create(scope, async (box, id) => {
       owner = id;
       await reserveBootstrapInitialization(box, 'Main', key, null);
@@ -579,7 +580,8 @@ describe('source-only create then native initialization', () => {
   it('reopens after init ACK is durable but display reload crashes, without another initialization', async () => {
     const env = environment();
     let owner = '';
-    env.ports.loadLatest.mockResolvedValueOnce(initialBasis()).mockRejectedValueOnce(new Error('reload interrupted'));
+    env.ports.loadHistoryBasis.mockResolvedValueOnce(initialBasis());
+    env.ports.loadLatest.mockRejectedValueOnce(new Error('reload interrupted'));
     await env.open().create(scope, async (box, id) => {
       owner = id;
       await reserveBootstrapInitialization(box, 'Main', key);

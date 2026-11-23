@@ -112,18 +112,21 @@ async function stopService(service, signal) {
   await service.done;
 }
 
-function runtimeCommand(action, operationId) {
-  const { command, args, cwd } = resolveRuntimeCommand(runtimeSettings);
+const STARTUP_OPERATION_ID = /^[0-9a-f]{32}$/;
+
+function runtimeCommand(action, operationId, selectedCommand) {
+  const { command, args, cwd } = selectedCommand ?? resolveRuntimeCommand(runtimeSettings);
   return { command, cwd, args: [...args, action, '--profile', 'astrid', '--data-root', runtimeSettings.dataRoot,
     ...(runtimeSettings.sourceManifest ? ['--source-manifest', runtimeSettings.sourceManifest] : []),
     // The Runtime opens the hosted page's door itself; `off` starts it without one.
     ...(action === 'up' || action === 'restart' ? ['--hosted-origin', runtimeSettings.hostedOrigin ?? 'off'] : []),
     ...(operationId ? ['--operation-id', operationId] : []),
+    ...(action === 'startup-status' ? ['--require-configured-selection'] : []),
     '--json'] };
 }
 
-async function runRuntimeCommand(action, operationId) {
-  const { command, args, cwd } = runtimeCommand(action, operationId);
+async function runRuntimeCommand(action, operationId, selectedCommand) {
+  const { command, args, cwd } = runtimeCommand(action, operationId, selectedCommand);
   const child = spawn(command, args, { cwd, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'], env: {
     ...process.env,
     ...(runtimeSettings.astridCheckout ? { ASTRID_CHECKOUT: runtimeSettings.astridCheckout } : {}),
@@ -138,7 +141,11 @@ async function runRuntimeCommand(action, operationId) {
       child.once('close', (code, signal) => code === 0 ? resolveClosed()
         : reject(new Error(`exited ${signal ? `with ${signal}` : `with code ${code}`}`)));
     });
-    return JSON.parse(stdout);
+    const response = JSON.parse(stdout);
+    if (action === 'up' && response?.code === 'startup_pending') {
+      if (!STARTUP_OPERATION_ID.test(response.operation_id ?? '')) throw new Error('Runtime up returned a malformed startup operation ID');
+    }
+    return response;
   }
   catch (error) {
     let reported;
@@ -147,15 +154,19 @@ async function runRuntimeCommand(action, operationId) {
     // This typed refusal is an observation handoff; all other failures retain
     // their existing error path and cleanup/custody behavior.
     if (action === 'up' && response?.code === 'startup_pending'
-      && typeof response.operation_id === 'string' && response.operation_id.length > 0) return response;
+      && STARTUP_OPERATION_ID.test(response.operation_id ?? '')) return response;
     throw new Error(`Runtime ${action} failed: ${reported || stderr.trim() || error.message}`);
   }
   finally { runtimeCliChild = null; }
 }
 
-async function observePendingRuntime(operationId) {
+async function observePendingRuntime(operationId, selectedCommand) {
   while (true) {
-    const observation = await runRuntimeCommand('startup-status', operationId);
+    if (interrupted) exit(130);
+    let observation;
+    try { observation = await runRuntimeCommand('startup-status', operationId, selectedCommand); }
+    catch (error) { if (interrupted) exit(130); throw error; }
+    if (interrupted) exit(130);
     if (!observation || observation.operation_id !== operationId || typeof observation.state !== 'string') {
       throw new Error('Runtime startup observation was malformed or changed operation');
     }
@@ -628,13 +639,18 @@ if (interrupted) exit(130);
 if (verified === NOT_RUNNING && !checkOnly && !buildOnly) {
   let result;
   try {
-    result = await runRuntimeCommand('up'); // CLI publishes discovery only after its owner passes readiness.
+    // Pin the executable and checkout used for up so observer polls stay with
+    // that exact selected Runtime even if source selection changes mid-launch.
+    const selectedRuntimeCommand = resolveRuntimeCommand(runtimeSettings);
+    result = await runRuntimeCommand('up', undefined, selectedRuntimeCommand); // CLI publishes discovery only after readiness.
     if (result.code === 'startup_pending') {
-      await observePendingRuntime(result.operation_id);
+      await observePendingRuntime(result.operation_id, selectedRuntimeCommand);
+      if (interrupted) exit(130);
       // An observed owner is never this launcher's cleanup responsibility.
       result = { status: 'reconnected' };
     }
   } catch (error) {
+    if (error instanceof LauncherExit) throw error;
     // The Runtime names whatever already holds its door's port.
     const message = error instanceof Error ? error.message : String(error);
     exit(fail(/already served by another Astrid Runtime/.test(message) ? OTHER_ASTRID_RUNNING

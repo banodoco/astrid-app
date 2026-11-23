@@ -53,7 +53,9 @@ isolated SL-1 stack. Set `SAVE_LOOP_ROOT` to the stack root and
 node scripts/save-loop/build-fixture.mjs --variant film-shaped
 ```
 
-The resulting manifest records the accepted Runtime head and generated media.
+The resulting manifest records the accepted Runtime head and generated media. The
+fixture imports two distinct images and two distinct videos for same-kind overlay
+swaps, and verifies their accepted identities and metadata.
 Collection and project pack admission and render proof remain pending; this
 builder does not establish a successful sweep. Its sources can also be prepared
 independently for development:
@@ -66,7 +68,7 @@ This writes a synthetic image and 90-second video and audio to a fresh directory
 `SAVE_LOOP_SCRATCH` (default `<app-checkout>.env/save-loop`) and prints their
 paths and object hashes. `--media-size WIDTHxHEIGHT` selects the even image and video
 dimensions (default `1280x720`); `--clips` records the requested count (default
-621). Media preparation does not create a timeline or prove the film fixture.
+621; minimum 23). Media preparation does not create a timeline or prove the film fixture.
 It uses the same disk floor as large shots.
 
 The `large-shots` command creates a fresh stack and performs one fixture build and sweep. It retains

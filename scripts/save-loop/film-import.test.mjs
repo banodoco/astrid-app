@@ -87,3 +87,27 @@ test('film output profiles use configured dimensions on parent and every shot', 
   assert.throws(() => prepareFilmImport({projectId: 'p', timelineId: 't', shape: filmShape(), selections: pins,
     mediaSize: {width: 641, height: 360}}), /invalid film output dimensions/);
 });
+
+test('film swap overlays use different media of the same kind as their originals', () => {
+  const video1 = {...pins[0], metadata: {width: 640, height: 360, duration_seconds: 90}};
+  const video2 = {...video1, asset: 'video-2', object_id: `sha256:${'2'.repeat(64)}`, generation_id: 'vg2', variant_id: 'vv2'};
+  const image1 = {...pins[0], metadata: {width: 640, height: 360}, asset: 'image-1', object_id: `sha256:${'3'.repeat(64)}`, generation_id: 'ig1', variant_id: 'iv1'};
+  const image2 = {...image1, asset: 'image-2', object_id: `sha256:${'4'.repeat(64)}`, generation_id: 'ig2', variant_id: 'iv2'};
+  const audio = {...pins[0], asset: 'audio', object_id: `sha256:${'5'.repeat(64)}`, generation_id: 'ag', variant_id: 'av'};
+  const narration = {selection: audio, image: image1, overlayImage: image2,
+    words: [{text:'a',at:0.1},{text:'b',at:1.1},{text:'c',at:0.01},{text:'c',at:0.05}]};
+  const request = prepareFilmImport({projectId:'p', timelineId:'t', shape:filmShape(), selections:[video1, video2], narration});
+  const parent = request.publication.parent_composition;
+  const shot = request.publication.internal_timeline_revisions[0].payload;
+  for (let i = 0; i < 2; i++) {
+    const original = shot.clips.find(c => c.id === `footage-0-${i}`);
+    const overlay = parent.clips.find(c => c.id === `overlay-${i}`);
+    const a = shot.registry.assets[original.asset], b = parent.registry.assets[overlay.asset];
+    assert.equal(a.type, i ? 'video' : 'image');
+    assert.equal(b.type, a.type);
+    assert.notEqual(b.media_id, a.media_id);
+    assert.equal(a.resolution, '640x360');
+    assert.equal(b.resolution, '640x360');
+    if (i) { assert.equal(a.duration, 90); assert.equal(b.duration, 90); }
+  }
+});

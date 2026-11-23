@@ -113,6 +113,35 @@ with tempfile.TemporaryDirectory() as d:
  after = {c['id']: c for c in candidate['shots']['test-film-shot-0001']['internal_timeline']['clips']}
  for cid in ('narration-later', 'footage-1-1'):
   assert abs(after[cid]['at'] - (by_id[cid]['at'] - 0.5)) < 1e-6, (cid, by_id[cid], after[cid], candidate['placements'][1])
+ # Ripple may move a narration clip in timeline time, but must preserve its
+ # source in/out points and playback rate.
+ def audio_rows(bundle):
+  holders = [('parent', bundle['parent'])]
+  holders += [(row['occurrence_id'], bundle['shots'][row['shot_id']]['internal_timeline'])
+              for row in bundle['placements']]
+  return {(owner, clip['id']): clip
+          for owner, holder in holders
+          for clip in holder['clips']
+          if clip['track'] in {track['id'] for track in holder['tracks'] if track['kind'] == 'audio'}}
+ def source_geometry(clip):
+  return tuple(clip[field] for field in ('from', 'to', 'speed'))
+ before_audio, after_audio = audio_rows(baseline), audio_rows(candidate)
+ expected_audio = {
+  ('test-film-occ-0', 'repeat-narration'): (0, 0.1, 1),
+  ('test-film-occ-1', 'narration'): (0, 0.2, 1),
+  ('test-film-occ-1', 'narration-later'): (0.7, 4.2, 1),
+ }
+ assert before_audio.keys() == after_audio.keys() == expected_audio.keys()
+ for key, expected in expected_audio.items():
+  assert source_geometry(before_audio[key]) == source_geometry(after_audio[key]) == expected, (key, source_geometry(before_audio[key]), source_geometry(after_audio[key]), expected)
+  if key[1] == 'narration-later':
+   assert abs(after_audio[key]['at'] - before_audio[key]['at'] + 0.5) < 1e-6
+   assert {k: v for k, v in before_audio[key].items() if k != 'at'} == {
+    k: v for k, v in after_audio[key].items() if k != 'at'
+   }
+  else:
+   assert after_audio[key] == before_audio[key]
+   assert baseline_spans[key] == ripple_spans[key]
  validate_final_candidate(candidate, baseline=baseline)
  before_reflow = copy.deepcopy(candidate)
  before_spans = clip_spans(before_reflow)

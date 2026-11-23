@@ -19,7 +19,7 @@ import {createHash, randomUUID} from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {filmMediaCommands, filmShape, parseFixtureOptions} from './film-shape.mjs';
+import {filmMediaCommands, filmFixtureShape, parseFixtureOptions} from './film-shape.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.resolve(here, '../..');
@@ -644,11 +644,12 @@ with open(os.environ['SAVE_LOOP_MEASUREMENT_PATH'], 'w', encoding='utf-8') as ou
 print(json.dumps(measurement, sort_keys=True))
 `;
 
-async function buildFilm({resolvedRoot, ports}) {
+async function buildFilm({resolvedRoot, ports, shape}) {
   const dir = fs.mkdtempSync(path.join(scratch, 'film-media-'));
-  const media = {image: [path.join(dir, 'image.png')], video: [path.join(dir, 'video.mp4')],
+  const media = {image: [path.join(dir, 'image.png'), path.join(dir, 'image-2.png')], video: [path.join(dir, 'video.mp4'), path.join(dir, 'video-2.mp4')],
     audio: [path.join(dir, 'audio.wav')]};
-  for (const args of filmMediaCommands(mediaSize, media.video[0], media.audio[0], media.image[0]))
+  for (const args of filmMediaCommands(mediaSize, media.video[0], media.audio[0], media.image[0], media.video[1], media.image[1], Math.max(90, Math.ceil(shape.shots[1].duration)),
+    Math.max(90, Math.ceil(Math.max(...shape.shots.flatMap(shot => shot.children.map(child => child.hold)))))))
     await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', ...args]);
   const bytes = Object.values(media).flat().reduce((sum, file) => sum + fs.statSync(file).size, 0);
   if (bytes > 1024 ** 3 || freeBytes() - bytes < 15 * 1024 ** 3)
@@ -659,8 +660,6 @@ async function buildFilm({resolvedRoot, ports}) {
   const projectId = findString(reply, 'project_id') || findString(reply, 'id');
   if (!projectId) throw new Error('Runtime omitted created project id');
   const timelineId = `film-shaped-${nonce}`;
-  // The split narration adds two clips to the shape's count.
-  const shape = filmShape({ripple: true, clipCount: clipTarget - 2, shotCount: Math.min(46, Math.floor((clipTarget - 4) / 8))});
   const collectionPackPath = process.env.SAVE_LOOP_COLLECTION_PACK;
   if (!collectionPackPath) throw new Error('SAVE_LOOP_COLLECTION_PACK must name the installed astrid_motion fixture pack');
   const versionsDir = path.resolve(resolvedRoot, 'program/versions');
@@ -701,6 +700,7 @@ async function buildFilm({resolvedRoot, ports}) {
 }
 
 async function main() {
+  const shape = variant === 'film-shaped' ? filmFixtureShape(clipTarget) : null;
   if (variant === 'film-shaped' && prepareMedia) {
     fs.mkdirSync(scratch, {recursive: true});
     assertDisk();
@@ -743,7 +743,7 @@ async function main() {
   fs.mkdirSync(scratch, {recursive: true});
   assertDisk();
   const diskBefore = freeBytes();
-  if (variant === 'film-shaped') return buildFilm({resolvedRoot, ports});
+  if (variant === 'film-shaped') return buildFilm({resolvedRoot, ports, shape});
   const mediaRoot = path.join(scratch, 'generated-media');
   const images = await mediaPool({dir: path.join(mediaRoot, 'images'), prefix: 'image-', suffix: '.png', count: imageCount,
     ffmpegArgs: pattern => ['-f', 'lavfi', '-i', `color=c=red:s=1920x1080:r=1:d=${imageCount}`,

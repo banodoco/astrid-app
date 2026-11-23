@@ -389,8 +389,7 @@ export function createTimelineLocalSaveHandoff(options: {
   }
 
   function remoteHistoryAvailable(): boolean {
-    return historyLoaded && !inversePending && options.session.getState().status === 'saved'
-      && same(options.session.getBasis().head, initial.head) && same(options.session.getDocument(), document);
+    return historyLoaded && !inversePending && options.session.getState().status === 'saved';
   }
   function canRequestHistory(displayHead?: TimelineHeadRevision): boolean {
     return !historyLoaded && Boolean(options.loadHistory) && !inversePending && options.session.getState().status === 'saved'

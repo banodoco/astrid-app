@@ -660,7 +660,7 @@ async function buildFilm({resolvedRoot, ports}) {
   if (!projectId) throw new Error('Runtime omitted created project id');
   const timelineId = `film-shaped-${nonce}`;
   // The split narration adds two clips to the shape's count.
-  const shape = filmShape({clipCount: clipTarget - 2, shotCount: Math.min(46, Math.floor((clipTarget - 4) / 8))});
+  const shape = filmShape({ripple: true, clipCount: clipTarget - 2, shotCount: Math.min(46, Math.floor((clipTarget - 4) / 8))});
   const collectionPackPath = process.env.SAVE_LOOP_COLLECTION_PACK;
   if (!collectionPackPath) throw new Error('SAVE_LOOP_COLLECTION_PACK must name the installed astrid_motion fixture pack');
   const versionsDir = path.resolve(resolvedRoot, 'program/versions');

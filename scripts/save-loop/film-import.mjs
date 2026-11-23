@@ -54,6 +54,7 @@ export function prepareFilmFootage({timelineId, shape, selections, legacyWord, n
       ...(width !== undefined ? {resolution: `${width}x${height}`} : {}),
       ...(duration !== undefined ? {duration} : {})};
   };
+  const narrationShot = shape.ripple ? 1 : 0;
   let index = 0;
   const internal = [], shots = [], occurrences = [], used = new Set();
   const original = new Map();
@@ -62,33 +63,38 @@ export function prepareFilmFootage({timelineId, shape, selections, legacyWord, n
     const shotId = id(`shot-${suffix}`), shotRevision = id(`shot-rev-${suffix}`), internalRevision = id(`internal-rev-${suffix}`);
     const assets = {};
     const clips = shot.children.map(child => {
-      const pin = narration && shot.index === 0 && child.index === 0 ? narration.image : selections[index++ % selections.length];
+      const pin = narration && shot.index === narrationShot && child.index === 0 ? narration.image : selections[index++ % selections.length];
       assets[pin.asset] = binding(pin, pin === narration?.image ? 'image' : 'video'); used.add(pin.object_id);
       const row = {id: `footage-${shot.index}-${child.index}`, clipType: 'media', track: `LV${child.track + 1}`,
         asset: pin.asset, at: child.at, hold: child.hold, from: 0, to: child.hold, speed: 1};
       // Occurrence durations are stored in integer milliseconds. Keep child
       // frame ends inside a rounded-down placement; the last placement retains
       // its separately declared historical overrun below.
-      if (shot.index !== shape.shots.length - 1 && row.at + row.hold > Math.round(shot.duration * 1000) / 1000) {
+      if (shot.index !== (shape.ripple ? 0 : shape.shots.length - 1) && row.at + row.hold > Math.round(shot.duration * 1000) / 1000) {
         row.hold -= 1 / 30;
         row.to = row.hold;
       }
-      if (narration && shot.index === 0 && child.index < 4) {
+      if (narration && shot.index === narrationShot && child.index < 4) {
         row.at = narration.words[child.index].at;
         if (narration.splitAt) row.hold = row.to = 0.1;
-        row.app = {astrid: {on: `"${narration.words[child.index].text}"`, for: row.hold}};
+        if (!shape.ripple || child.index < 2) row.app = {astrid: {on: `"${narration.words[child.index].text}"`, for: row.hold}};
       }
-      if (legacyWord && !narration && shot.index === 0 && child.index === 1) {
+      if (legacyWord && !narration && shot.index === narrationShot && child.index === 1) {
         if (legacyWord.at + child.hold > shot.duration) throw new Error('legacy word clip exceeds its shot');
         row.at = legacyWord.at;
         row.app = {astrid: {on: `"${legacyWord.text}"`, for: child.hold}};
+      }
+      if (shape.ripple && shot.index === 1 && child.index >= 2 && row.at < 0.7) row.at = 0.7;
+      if (shape.ripple && narration && shot.index === 0 && (child.index === 2 || child.index === 3)) {
+        row.at = child.index === 2 ? 0 : 1 / 30; row.hold = row.to = 3 / 30;
+        row.app = {astrid: {on: '"repeat"', for: row.hold}};
       }
       original.set(`${shot.index}:${child.index}`, row);
       return row;
     });
     const payload = {tracks: Array.from({length: 4}, (_, n) => ({id: `LV${n + 1}`, kind: 'visual', label: `LV${n + 1}`})),
       clips, effects: [], audio: [], layout: {}, registry: {assets}, assets: [], output: {...output}};
-    if (narration && shot.index === 0) {
+    if (narration && shot.index === narrationShot) {
       const pin = narration.selection;
       payload.tracks.push({id: 'LA1', kind: 'audio', label: 'LA1'});
       payload.registry.assets[pin.asset] = binding(pin, 'audio');
@@ -108,6 +114,14 @@ export function prepareFilmFootage({timelineId, shape, selections, legacyWord, n
       }
       used.add(pin.object_id);
     }
+    if (shape.ripple && narration && shot.index === 0) {
+      const pin = narration.selection;
+      payload.tracks.push({id: 'LA1', kind: 'audio', label: 'LA1'});
+      payload.registry.assets[pin.asset] = binding(pin, 'audio');
+      payload.clips.push({id: 'repeat-narration', clipType: 'audio', track: 'LA1', asset: pin.asset,
+        at: 0, hold: 3 / 30, from: 0, to: 3 / 30, speed: 1});
+      used.add(pin.object_id);
+    }
     const internalDigest = revisionDigest(payload);
     internal.push({timeline_id: timelineId, revision_id: internalRevision, payload, content_digest: internalDigest});
     const shotPayload = {metadata: {title: `Fixture shot ${shot.index + 1}`}, items: [], pools: [], selected_variants: {},
@@ -121,7 +135,7 @@ export function prepareFilmFootage({timelineId, shape, selections, legacyWord, n
   }
   // Import represents a historical baseline, so shorten one placement rather
   // than introducing an overrun through the normal timeline edit validator.
-  const legacy = occurrences.at(-1);
+  const legacy = shape.ripple ? occurrences[0] : occurrences.at(-1);
   if (legacy.duration_ms <= 100) throw new Error('last occurrence is too short for historical overrun');
   legacy.duration_ms -= 100;
   const parentAssets = {};

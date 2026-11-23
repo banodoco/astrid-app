@@ -42,7 +42,7 @@ export function filmMediaCommands({width, height}, video, audio, image) {
 
 // Counts include two parent overlays and three parent elements. Coordinates use exact 30 fps frames;
 // each overlay covers its referenced shot-owned original in parent time.
-export function filmShape({clipCount = 621, shotCount = 46} = {}) {
+export function filmShape({clipCount = 621, shotCount = 46, ripple = false} = {}) {
   if (!Number.isSafeInteger(clipCount) || clipCount < 8) throw new Error('clipCount must be an integer >= 8');
   if (!Number.isSafeInteger(shotCount) || shotCount < 1) throw new Error('shotCount must be a positive integer');
   const frames = 196 * 30;
@@ -62,10 +62,17 @@ export function filmShape({clipCount = 621, shotCount = 46} = {}) {
   });
   if (shots.some(shot => shot.children.some(child => child.hold <= 0)))
     throw new Error('too many clips for the fixture duration and track count');
-  const originals = shots.flatMap(shot => shot.children.map(child => ({shot, child}))).slice(0, 2);
+  if (ripple) {
+    if (shots.length < 2 || shots[0].children.length < 12) throw new Error('ripple fixture needs two populated shots');
+    shots[0].duration = 4.2;
+    shots[0].children.at(-1).hold -= 1 / 30;
+    shots[0].children.splice(11, 1);
+    shots.slice(1).forEach(shot => shot.on -= 1 / 30);
+  }
+  const originals = (ripple ? shots.slice(1) : shots).flatMap(shot => shot.children.map(child => ({shot, child}))).slice(0, 2);
   const overlays = originals.map(({shot, child}) => ({shotIndex: shot.index, childIndex: child.index,
     at: shot.on + child.at, hold: child.hold}));
   const elements = ['built-in', 'collection-pack', 'project-pack'].map((kind, index) =>
     ({kind, at: 10 + index * 3, hold: 2}));
-  return {durationSeconds: frames / 30, shots, overlays, elements};
+  return {durationSeconds: frames / 30, shots, overlays, elements, ...(ripple ? {ripple: true} : {})};
 }

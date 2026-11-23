@@ -36,6 +36,7 @@ import {
   RUNTIME_TARGETED_EXECUTION_CAPABILITY,
 } from './contract-metadata.ts';
 import { runtimeApiBase, runtimeOrigin } from './connection.ts';
+import { readLocalWorkspaceProjectSelection } from './localWorkspaceProjectSelection.ts';
 import { loadWorkspaceRuntimeConfig, type WorkspaceRuntimeConfig } from './workspaceRuntimeConfig.ts';
 
 // A client without an explicit `baseUrl` asks `runtimeApiBase()` on every request: same-origin
@@ -860,7 +861,7 @@ export class AstridRuntimeClient {
     const config = await initializeWorkspaceRuntimeConfig();
     if (!config?.localWorkspaceProxy) return false;
     return this.withSession(async ({ handshake }) => {
-      const selection = workspaceProjectSelectionSchema.safeParse(await this.client.currentProject());
+      const selection = workspaceProjectSelectionSchema.safeParse(await readLocalWorkspaceProjectSelection(config, this.signal));
       return selection.success
         && selection.data.actor_id === handshake.actor_id
         && selection.data.project.realm_id === handshake.realm_id

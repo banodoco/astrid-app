@@ -1,9 +1,22 @@
 export const WORKSPACE_RUNTIME_CONFIG_PATH = '/runtime-config/v1/workspace.json';
+export const LOCAL_WORKSPACE_ORIGIN_HEADER = 'x-astrid-local-workspace-origin';
 
 export interface WorkspaceRuntimeConfig {
   actorId: string;
   realmId: string;
   runtimeInstanceId: string;
+  localWorkspaceProxy?: true;
+}
+
+const localWorkspaceOrigins = new WeakMap<WorkspaceRuntimeConfig, string>();
+
+/** Only a config read from the preview proxy carries its origin proof. */
+export function localWorkspaceProxyOrigin(config: WorkspaceRuntimeConfig): string | undefined {
+  return localWorkspaceOrigins.get(config);
+}
+
+function isLoopbackHttp(url: URL): boolean {
+  return url.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) && Boolean(url.port);
 }
 
 /** The local preview proxy supplies this on every page load; other builds retain their baked binding. */
@@ -35,16 +48,18 @@ export async function loadWorkspaceRuntimeConfig(
       || Object.keys(value).sort().join(',') !== 'actorId,endpoint,realmId,runtimeInstanceId,schemaVersion'
       || typeof value.endpoint !== 'string') return fallback;
     const endpoint = new URL(value.endpoint);
-    if (endpoint.protocol !== 'http:'
-      || !['127.0.0.1', 'localhost', '[::1]'].includes(endpoint.hostname)
-      || !endpoint.port) return fallback;
+    if (!isLoopbackHttp(endpoint)) return fallback;
     const ids = [value.actorId, value.realmId, value.runtimeInstanceId];
     if (ids.some((id) => typeof id !== 'string' || !id.trim())) return fallback;
-    return {
+    const localWorkspaceProxy = isLoopbackHttp(url) && response.headers.get(LOCAL_WORKSPACE_ORIGIN_HEADER) === url.origin;
+    const binding: WorkspaceRuntimeConfig = {
       actorId: (value.actorId as string).trim(),
       realmId: (value.realmId as string).trim(),
       runtimeInstanceId: (value.runtimeInstanceId as string).trim(),
+      ...(localWorkspaceProxy ? { localWorkspaceProxy: true } : {}),
     };
+    if (localWorkspaceProxy) localWorkspaceOrigins.set(binding, url.origin);
+    return binding;
   } catch {
     return fallback;
   } finally {

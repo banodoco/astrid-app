@@ -49,6 +49,8 @@ export interface TimelineLocalSaveHandoff {
   discharge?(mode: 'latest' | 'keep', exported?: RejectedSaveReceipt, stillCurrent?: () => boolean): Promise<TimelineSaveReceipt | void>;
   /** True only when the durable owner is settled and has an accepted target. */
   remoteHistoryAvailable(): boolean;
+  canRequestHistory?(displayHead?: TimelineHeadRevision): boolean;
+  refreshHistory?(): Promise<void>;
   canUndo(): boolean;
   canRedo(): boolean;
   undo(): Promise<void>;
@@ -360,6 +362,9 @@ export function createTimelineLocalSaveHandoff(options: {
   let document = structuredClone(options.initial.canonicalDocument);
   let sourceChecked = false;
   let targets = historyTargets(options.initial.history, options.initial.head, options.session.actorId);
+  let historyLoaded = completeHistory(options.initial.history, options.initial.head);
+  let historyEpoch = 0;
+  const legacyHistory = options.initial.history !== undefined;
   let inversePending = false;
 
   async function appendInverse(kind: 'undo' | 'redo'): Promise<void> {
@@ -384,7 +389,25 @@ export function createTimelineLocalSaveHandoff(options: {
   }
 
   function remoteHistoryAvailable(): boolean {
-    return !inversePending && options.session.getState().status === 'saved';
+    return historyLoaded && !inversePending && options.session.getState().status === 'saved';
+  }
+  function canRequestHistory(displayHead?: TimelineHeadRevision): boolean {
+    return !historyLoaded && Boolean(options.loadHistory) && !inversePending && options.session.getState().status === 'saved'
+      && same(options.session.getBasis().head, initial.head) && same(options.session.getDocument(), document)
+      && (!displayHead || (displayHead.projectId === initial.canonicalDocument.project_id
+        && displayHead.timelineId === initial.canonicalDocument.timeline_id && displayHead.headRevisionId === initial.head.revisionId
+        && displayHead.headPublicationId === initial.head.publicationId));
+  }
+  async function refreshHistory(): Promise<void> {
+    if (!options.loadHistory || options.session.getState().status !== 'saved') return;
+    const epoch = historyEpoch;
+    const basis = options.session.getBasis();
+    const snapshot = structuredClone(options.session.getDocument());
+    const latest = await options.loadHistory();
+    if (historyEpoch !== epoch || options.session.getState().status !== 'saved' || !same(options.session.getBasis().head, basis.head)
+      || !same(options.session.getDocument(), snapshot) || !same(latest.head, basis.head)) return;
+    historyLoaded = completeHistory(latest.history, basis.head);
+    targets = historyTargets(latest.history, basis.head, options.session.actorId);
   }
   function changes(raw: unknown, previous: unknown, next: unknown, path: string[], element = false): unknown {
     if (same(previous, next)) return structuredClone(raw);
@@ -497,6 +520,8 @@ export function createTimelineLocalSaveHandoff(options: {
   }
   const handoff: TimelineLocalSaveHandoff = {
     capture(input, gestureBasis) {
+      historyEpoch++;
+      historyLoaded = false;
       try {
         const next = structuredClone(input);
         checkHead(initial, source, 'capture-source-head-unavailable');
@@ -1007,6 +1032,7 @@ export function createTimelineLocalSaveHandoff(options: {
       }
     },
     async flush() {
+      historyEpoch++;
       try {
         const basis = await options.session.flush();
         const adopted = options.adopted(basis);
@@ -1020,10 +1046,8 @@ export function createTimelineLocalSaveHandoff(options: {
         document = structuredClone(basis.canonicalDocument);
         sourceChecked = false;
         targets = historyTargets(basis.history, basis.head, options.session.actorId);
-        if (options.loadHistory) {
-          const latest = await options.loadHistory();
-          targets = historyTargets(same(latest.head, basis.head) ? latest.history : undefined, basis.head, options.session.actorId);
-        }
+        historyLoaded = completeHistory(basis.history, basis.head);
+        if (legacyHistory && options.loadHistory) await refreshHistory();
         return adopted.receipt;
       }
       catch (error) {
@@ -1036,6 +1060,7 @@ export function createTimelineLocalSaveHandoff(options: {
       }
     },
     async discharge(mode, exported, stillCurrent) {
+      historyEpoch++;
       let failure: unknown;
       try { await options.session.discharge(mode, exported, stillCurrent); }
       catch (error) { if (exported) throw error; failure = error; }
@@ -1062,15 +1087,23 @@ export function createTimelineLocalSaveHandoff(options: {
       document = structuredClone(basis.canonicalDocument);
       sourceChecked = false;
       targets = historyTargets(basis.history, basis.head, options.session.actorId);
+      historyLoaded = completeHistory(basis.history, basis.head);
       return adopted.receipt;
     },
     remoteHistoryAvailable,
+    canRequestHistory,
+    refreshHistory,
     canUndo: () => remoteHistoryAvailable() && targets.undo.length > 0,
     canRedo: () => remoteHistoryAvailable() && targets.redo.length > 0,
     undo: () => appendInverse('undo'),
     redo: () => appendInverse('redo'),
   };
   return handoff;
+}
+
+function completeHistory(history: HistoryPage | undefined, head: TimelineCommandBasis['head']): boolean {
+  return Boolean(history && Array.isArray(history.items) && history.next_cursor === null
+    && history.head?.revision_id === head.revisionId && history.head?.publication_id === head.publicationId);
 }
 
 function historyTargets(history: HistoryPage | undefined, head: TimelineCommandBasis['head'], actorId: string): { undo: string[]; redo: string[] } {

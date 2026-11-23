@@ -49,6 +49,13 @@ function restoreHeadResource(overrides: Record<string, unknown> = {}) {
   };
 }
 
+const reviewedRestore = {
+  projectId: PROJECT_ID,
+  parentDocumentId: TIMELINE_ID,
+  revisionId: 'parent-old',
+  reviewedHead: { revisionId: 'parent-r1', publicationId: 'publication-current' },
+};
+
 function preparedMediaSelection(overrides: Partial<MediaSelection> = {}): MediaSelection {
   return {
     asset: 'prepared-video',
@@ -612,7 +619,7 @@ describe('RuntimeDataProvider', () => {
 
     const history = await provider.shotComposition.listHistory!({ projectId: PROJECT_ID, parentDocumentId: TIMELINE_ID });
     expect(history.map((entry) => entry.revisionId)).toEqual(['parent-r1', 'parent-old']);
-    const restored = provider.shotComposition.restoreHistory!({ projectId: PROJECT_ID, parentDocumentId: TIMELINE_ID, revisionId: 'parent-old' });
+    const restored = provider.shotComposition.restoreHistory!(reviewedRestore);
     if (complete) {
       await expect(restored).resolves.toEqual({ newHead: 'restore-parent-old' });
     } else {
@@ -644,7 +651,7 @@ describe('RuntimeDataProvider', () => {
       }
       return fixture.transport(...args);
     } });
-    await expect(provider.shotComposition.restoreHistory!({ projectId: PROJECT_ID, parentDocumentId: TIMELINE_ID, revisionId: 'parent-old' }))
+    await expect(provider.shotComposition.restoreHistory!(reviewedRestore))
       .rejects.toThrow(_label.startsWith('empty') ? 'is missing' : 'verified revision and publication');
     expect(restoreSends).toBe(0);
   });
@@ -659,26 +666,65 @@ describe('RuntimeDataProvider', () => {
       }
       return fixture.transport(...args);
     } });
-    await expect(provider.shotComposition.restoreHistory!({ projectId: PROJECT_ID, parentDocumentId: TIMELINE_ID, revisionId: 'parent-old' }))
+    await expect(provider.shotComposition.restoreHistory!(reviewedRestore))
       .rejects.toThrow('belongs to');
     expect(restoreSends).toBe(0);
+  });
+
+  it.each([
+    ['revision and publication', 'parent-r2'],
+    ['publication only', 'parent-r1'],
+  ])('refuses restore before POST when the reviewed %s moved before click', async (_label, revision) => {
+    const fixture = runtimeFixture();
+    const restorePosts: string[] = [];
+    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: async (...args) => {
+      const [method, path] = args;
+      if (method === 'GET' && path === `/v1/projects/${PROJECT_ID}/timelines/${TIMELINE_ID}`) {
+        return { status: 200, headers: {}, body: json(restoreHeadResource({
+          head_revision_id: revision, head_publication_id: 'publication-moved',
+        })) };
+      }
+      if (method === 'POST' && path.endsWith('/restore')) {
+        restorePosts.push(path);
+        return { status: 422, headers: {}, body: json({ code: 'unexpected_post', message: 'Unexpected restore POST' }) };
+      }
+      return fixture.transport(...args);
+    } });
+    const result = await provider.shotComposition.restoreHistory!(reviewedRestore).catch(error => error);
+    expect(restorePosts).toEqual([]);
+    expect(result).toEqual(expect.objectContaining({ message: expect.stringContaining('Open history again') }));
+  });
+
+  it('refuses a Runtime restore without a reviewed revision and publication', async () => {
+    const fixture = runtimeFixture();
+    const transport = vi.fn(publicTimelineTransport(fixture));
+    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport });
+    const { reviewedHead: _reviewedHead, ...unreviewedRestore } = reviewedRestore;
+    await expect(provider.shotComposition.restoreHistory!(unreviewedRestore)).rejects.toThrow('reviewed revision and publication');
+    expect(transport).not.toHaveBeenCalled();
   });
 
   it('preserves Runtime 409 for a stale restore pair without refreshing or falling back', async () => {
     const fixture = runtimeFixture();
     const requests: Array<{ method: string; path: string; body?: unknown }> = [];
+    let current = restoreHeadResource();
     const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: async (...args) => {
       const [method, path, , body] = args;
-      requests.push({ method, path, ...(body ? { body: JSON.parse(new TextDecoder().decode(body as Uint8Array)) } : {}) });
+      const request = body ? JSON.parse(new TextDecoder().decode(body as Uint8Array)) : undefined;
+      requests.push({ method, path, ...(request ? { body: request } : {}) });
       if (method === 'GET' && path === `/v1/projects/${PROJECT_ID}/timelines/${TIMELINE_ID}`) {
-        return { status: 200, headers: {}, body: json(restoreHeadResource()) };
+        const preflight = current;
+        current = restoreHeadResource({ head_publication_id: 'publication-moved' });
+        return { status: 200, headers: {}, body: json(preflight) };
       }
       if (path.endsWith('/restore')) {
+        expect(request.expected_head).toBe(current.head_revision_id);
+        expect(request.expected_publication_id).not.toBe(current.head_publication_id);
         return { status: 409, headers: {}, body: json({ code: 'conflict', message: 'stale restore head', request_id: 'restore-stale', details: { reason: 'stale_head' } }) };
       }
       return fixture.transport(...args);
     } });
-    await expect(provider.shotComposition.restoreHistory!({ projectId: PROJECT_ID, parentDocumentId: TIMELINE_ID, revisionId: 'parent-old' }))
+    await expect(provider.shotComposition.restoreHistory!(reviewedRestore))
       .rejects.toMatchObject({ status: 409, code: 'conflict', details: { reason: 'stale_head' } });
     expect(requests.filter((request) => request.path.includes(`/timelines/${TIMELINE_ID}`))).toEqual([
       { method: 'GET', path: `/v1/projects/${PROJECT_ID}/timelines/${TIMELINE_ID}` },
@@ -923,6 +969,64 @@ it('returns a playable locator for a freshly prepared object before registry rea
   });
 
 describe('verified basis loader diagnostics', () => {
+  it('loads an advertised verified head without requesting history or immutable revisions', async () => {
+    const fixture = runtimeFixture();
+    const head = { revision_id: 'r0', publication_id: 'p0' };
+    const document = acceptedCommit(head, head,
+      { projectId: PROJECT_ID, timelineId: TIMELINE_ID, children: true }).data.canonical_document;
+    const calls: string[] = [];
+    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: async (...args) => {
+      const [, path] = args;
+      calls.push(path);
+      if (path === '/v1/handshake') {
+        const response = await fixture.transport(...args);
+        const handshake = JSON.parse(new TextDecoder().decode(response.body));
+        handshake.capabilities.push('timeline.verified_head.v1');
+        return { ...response, body: json(handshake) };
+      }
+      if (path === `/v1/projects/${PROJECT_ID}/timelines/${TIMELINE_ID}/verified-head`) {
+        return { status: 200, headers: {}, body: json({ project_id: PROJECT_ID, timeline_id: TIMELINE_ID, head, canonical_document: document }) };
+      }
+      if (path.includes('/commits?') || path.includes('/composition-revisions/')
+        || path.includes('/shots/') || path.includes('/revisions/')) throw new Error('unexpected history or revision read');
+      return fixture.transport(...args);
+    } });
+    const basis = await provider.loadTimelineCommandBasis(TIMELINE_ID);
+    expect(basis.head).toEqual({ revisionId: 'r0', publicationId: 'p0' });
+    expect(basis.canonicalDocument).toEqual(document);
+    expect(basis.history).toBeUndefined();
+    expect(calls.filter(path => path.includes('/verified-head'))).toHaveLength(1);
+    expect(calls.some(path => path.includes('/commits?'))).toBe(false);
+  });
+
+  it.each(['not-found', 'scope', 'pair', 'closure'] as const)(
+    'refuses an advertised verified head failure without falling back (%s)', async fault => {
+      const fixture = runtimeFixture();
+      const head = { revision_id: 'r0', publication_id: 'p0' };
+      const document = acceptedCommit(head, head,
+        { projectId: PROJECT_ID, timelineId: TIMELINE_ID, children: true }).data.canonical_document;
+      let historyReads = 0;
+      const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: async (...args) => {
+        const [, path] = args;
+        if (path === '/v1/handshake') {
+          const response = await fixture.transport(...args);
+          const handshake = JSON.parse(new TextDecoder().decode(response.body));
+          handshake.capabilities.push('timeline.verified_head.v1');
+          return { ...response, body: json(handshake) };
+        }
+        if (path.includes('/commits?')) historyReads++;
+        if (path.endsWith('/verified-head')) {
+          if (fault === 'not-found') return { status: 404, headers: {}, body: json({ code: 'not_found', message: 'missing timeline' }) };
+          return { status: 200, headers: {}, body: json({ project_id: fault === 'scope' ? 'other' : PROJECT_ID,
+            timeline_id: TIMELINE_ID, head: fault === 'pair' ? { ...head, publication_id: '' } : head,
+            canonical_document: fault === 'closure' ? { ...document, timeline_id: 'other' } : document }) };
+        }
+        return fixture.transport(...args);
+      } });
+      await expect(provider.loadTimelineCommandBasis(TIMELINE_ID)).rejects.toThrow();
+      expect(historyReads).toBe(0);
+    });
+
   it.each([
     ['history-head', 'history', /malformed timeline history head/],
     ['next-history-head', 'history', /malformed timeline history head/],

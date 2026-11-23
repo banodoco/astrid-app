@@ -23,7 +23,7 @@ import type {
   UndoEntry,
   UndoSnapshot,
 } from '@/tools/video-editor/types/history.ts';
-import type { CanonicalShotCompositionHistoryEntry } from '@/tools/video-editor/data/shotCompositionAdapter.ts';
+import type { CanonicalShotCompositionHistoryEntry, ShotCompositionHistoryRestoreRequest } from '@/tools/video-editor/data/shotCompositionAdapter.ts';
 import type { TimelineLocalSaveHandoff } from './timelineLocalSaveHandoff.ts';
 
 const UNDO_STACK_LIMIT = 100;
@@ -48,7 +48,7 @@ export interface UseTimelineHistoryArgs {
    */
   pendingOpsRef: MutableRefObject<number>;
   editability?: TimelineEditability;
-  remoteHistory?: Pick<TimelineLocalSaveHandoff, 'remoteHistoryAvailable' | 'canUndo' | 'canRedo' | 'undo' | 'redo'>;
+  remoteHistory?: Pick<TimelineLocalSaveHandoff, 'remoteHistoryAvailable' | 'canRequestHistory' | 'refreshHistory' | 'canUndo' | 'canRedo' | 'undo' | 'redo'>;
 }
 
 export interface UseTimelineHistoryResult {
@@ -74,6 +74,10 @@ export interface UseTimelineHistoryResult {
 
 function cloneConfig(config: TimelineConfig): TimelineConfig {
   return structuredClone(config);
+}
+
+function historyBasis(data: TimelineData | null): string | null {
+  return data ? JSON.stringify([data.head, data.config, data.registry, data.sourceItemsBySchemaRef]) : null;
 }
 
 function buildSnapshot(currentData: TimelineData): UndoSnapshot {
@@ -131,9 +135,15 @@ export function useTimelineHistory({
   const [canRedo, setCanRedo] = useState(false);
   const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([]);
   const [canonicalHistory, setCanonicalHistory] = useState<readonly CanonicalShotCompositionHistoryEntry[]>([]);
-  const [canonicalHistoryError, setCanonicalHistoryError] = useState<string | null>(null);
+  const [canonicalHistoryError, setCanonicalHistoryError] = useState<string | null>(remoteHistory ? 'History has not been loaded.' : null);
   const [restoringCanonicalRevisionId, setRestoringCanonicalRevisionId] = useState<string | null>(null);
   const canonicalHistoryRequestRef = useRef(0);
+  const historyActionPendingRef = useRef(false);
+  const canonicalHistoryBasisRef = useRef<{
+    data: TimelineData | null;
+    fingerprint: string | null;
+    reviewedHead: ShotCompositionHistoryRestoreRequest['reviewedHead'];
+  } | null>(null);
   const canonicalHistorySupported = Boolean(provider.shotComposition?.listHistory && provider.shotComposition?.restoreHistory);
 
   const syncHistoryState = useCallback(() => {
@@ -324,9 +334,26 @@ export function useTimelineHistory({
 
   const undo = useCallback(() => {
     if (remoteHistory) {
-      if (!remoteHistory.remoteHistoryAvailable() || !remoteHistory.canUndo()
-        || pendingOpsRef.current > 0 || isInteractionActive(interactionStateRef)
-        || (editability?.checkTimeline && !editability.checkTimeline().allowed)) return;
+      if (pendingOpsRef.current > 0 || isInteractionActive(interactionStateRef)
+        || (editability?.checkTimeline && !editability.checkTimeline().allowed) || historyActionPendingRef.current) return;
+      if (!remoteHistory.remoteHistoryAvailable()) {
+        const basis = dataRef.current;
+        if (!basis?.head?.headRevisionId || !basis.head.headPublicationId) return;
+        if (!remoteHistory.canRequestHistory?.(basis.head) || !remoteHistory.refreshHistory) return;
+        const fingerprint = historyBasis(basis);
+        historyActionPendingRef.current = true;
+        void remoteHistory.refreshHistory().then(async () => {
+          if (dataRef.current !== basis || historyBasis(dataRef.current) !== fingerprint || pendingOpsRef.current > 0
+            || isInteractionActive(interactionStateRef) || (editability?.checkTimeline && !editability.checkTimeline().allowed)
+            || !remoteHistory.remoteHistoryAvailable()) return;
+          if (!remoteHistory.canUndo()) { toast.info('No saved timeline change to undo'); return; }
+          await remoteHistory.undo();
+        }).catch((error: unknown) => {
+          toast.error('Could not undo timeline', { description: error instanceof Error ? error.message : String(error) });
+        }).finally(() => { historyActionPendingRef.current = false; });
+        return;
+      }
+      if (!remoteHistory.canUndo()) return;
       void remoteHistory.undo().catch((error: unknown) => {
         toast.error('Could not undo timeline', { description: error instanceof Error ? error.message : String(error) });
       });
@@ -366,9 +393,26 @@ export function useTimelineHistory({
 
   const redo = useCallback(() => {
     if (remoteHistory) {
-      if (!remoteHistory.remoteHistoryAvailable() || !remoteHistory.canRedo()
-        || pendingOpsRef.current > 0 || isInteractionActive(interactionStateRef)
-        || (editability?.checkTimeline && !editability.checkTimeline().allowed)) return;
+      if (pendingOpsRef.current > 0 || isInteractionActive(interactionStateRef)
+        || (editability?.checkTimeline && !editability.checkTimeline().allowed) || historyActionPendingRef.current) return;
+      if (!remoteHistory.remoteHistoryAvailable()) {
+        const basis = dataRef.current;
+        if (!basis?.head?.headRevisionId || !basis.head.headPublicationId) return;
+        if (!remoteHistory.canRequestHistory?.(basis.head) || !remoteHistory.refreshHistory) return;
+        const fingerprint = historyBasis(basis);
+        historyActionPendingRef.current = true;
+        void remoteHistory.refreshHistory().then(async () => {
+          if (dataRef.current !== basis || historyBasis(dataRef.current) !== fingerprint || pendingOpsRef.current > 0
+            || isInteractionActive(interactionStateRef) || (editability?.checkTimeline && !editability.checkTimeline().allowed)
+            || !remoteHistory.remoteHistoryAvailable()) return;
+          if (!remoteHistory.canRedo()) { toast.info('No saved timeline change to redo'); return; }
+          await remoteHistory.redo();
+        }).catch((error: unknown) => {
+          toast.error('Could not redo timeline', { description: error instanceof Error ? error.message : String(error) });
+        }).finally(() => { historyActionPendingRef.current = false; });
+        return;
+      }
+      if (!remoteHistory.canRedo()) return;
       void remoteHistory.redo().catch((error: unknown) => {
         toast.error('Could not redo timeline', { description: error instanceof Error ? error.message : String(error) });
       });
@@ -478,17 +522,40 @@ export function useTimelineHistory({
       return;
     }
 
-    setCanonicalHistoryError(null);
+    const basis = dataRef.current;
+    const fingerprint = historyBasis(basis);
+    const head = basis?.head;
+    const capturedHead = head?.projectId === historyProjectId && head.timelineId === timelineId
+      && head.headRevisionId && head.headPublicationId
+      ? { revisionId: head.headRevisionId, publicationId: head.headPublicationId }
+      : undefined;
+    canonicalHistoryBasisRef.current = null;
+    setCanonicalHistoryError(remoteHistory ? 'Loading timeline history…' : null);
     try {
+      await remoteHistory?.refreshHistory?.();
       const entries = await listHistory({ projectId: historyProjectId, parentDocumentId: timelineId });
-      if (requestId === canonicalHistoryRequestRef.current) setCanonicalHistory(entries);
+      if (requestId === canonicalHistoryRequestRef.current) {
+        const reviewedHead = capturedHead
+          && entries.some(entry => entry.isCurrentHead && entry.revisionId === capturedHead.revisionId)
+          ? capturedHead
+          : undefined;
+        if (remoteHistory && (dataRef.current !== basis || historyBasis(dataRef.current) !== fingerprint
+          || !reviewedHead || !remoteHistory.remoteHistoryAvailable())) {
+          setCanonicalHistory([]);
+          setCanonicalHistoryError('Timeline changed while history was loading. Open history again.');
+          return;
+        }
+        canonicalHistoryBasisRef.current = { data: basis, fingerprint, reviewedHead };
+        setCanonicalHistory(entries);
+        setCanonicalHistoryError(null);
+      }
     } catch (error: unknown) {
       if (requestId === canonicalHistoryRequestRef.current) {
         setCanonicalHistory([]);
         setCanonicalHistoryError(error instanceof Error ? error.message : String(error));
       }
     }
-  }, [historyProjectId, provider, timelineId]);
+  }, [dataRef, historyProjectId, provider, remoteHistory, timelineId]);
 
   useEffect(() => {
     return () => {
@@ -499,6 +566,13 @@ export function useTimelineHistory({
   const restoreCanonicalRevision = useCallback(async (revisionId: string) => {
     const restoreHistory = provider.shotComposition?.restoreHistory;
     if (!restoreHistory || !timelineId || !historyProjectId) return;
+    const basis = canonicalHistoryBasisRef.current;
+    if (remoteHistory && (!basis || basis.data !== dataRef.current
+      || basis.fingerprint !== historyBasis(dataRef.current)
+      || !remoteHistory.remoteHistoryAvailable() || !canonicalHistory.some(entry => entry.revisionId === revisionId))) {
+      setCanonicalHistoryError('Load current timeline history before restoring a revision.');
+      return;
+    }
     if (editability?.checkTimeline && !editability.checkTimeline().allowed) return;
     if (pendingOpsRef.current > 0 || isInteractionActive(interactionStateRef)) {
       setCanonicalHistoryError('History restore is paused while an edit or media upload is active.');
@@ -508,7 +582,8 @@ export function useTimelineHistory({
     setCanonicalHistoryError(null);
     setRestoringCanonicalRevisionId(revisionId);
     try {
-      await restoreHistory({ projectId: historyProjectId, parentDocumentId: timelineId, revisionId });
+      await restoreHistory({ projectId: historyProjectId, parentDocumentId: timelineId, revisionId,
+        ...(basis?.reviewedHead ? { reviewedHead: basis.reviewedHead } : {}) });
       const entries = await provider.shotComposition?.listHistory?.({
         projectId: historyProjectId,
         parentDocumentId: timelineId,
@@ -525,22 +600,31 @@ export function useTimelineHistory({
     } finally {
       setRestoringCanonicalRevisionId(null);
     }
-  }, [editability, historyProjectId, interactionStateRef, pendingOpsRef, provider, syncHistoryState, timelineId, toast]);
+  }, [canonicalHistory, dataRef, editability, historyProjectId, interactionStateRef, pendingOpsRef, provider, remoteHistory, syncHistoryState, timelineId, toast]);
 
   // Read at render time. Every pendingOps transition is bracketed by a data
   // commit (skeleton insert on increment; skeleton removal / failure cleanup
   // before the `finally` decrement), so the tree re-renders right after each
   // transition and this value cannot go stale for longer than that commit.
   const historyPausedForUploads = pendingOpsRef.current > 0;
+  const canRequestRemoteHistory = Boolean(dataRef.current?.head?.headRevisionId && dataRef.current.head.headPublicationId
+    && remoteHistory?.canRequestHistory?.(dataRef.current.head) && remoteHistory.refreshHistory
+    && !historyActionPendingRef.current && !historyPausedForUploads && !isInteractionActive(interactionStateRef)
+    && (!editability?.checkTimeline || editability.checkTimeline().allowed));
+  const canonicalHistoryBasis = canonicalHistoryBasisRef.current;
+  const historyStale = Boolean(remoteHistory && canonicalHistoryBasis
+    && (canonicalHistoryBasis.data !== dataRef.current
+      || canonicalHistoryBasis.fingerprint !== historyBasis(dataRef.current)
+      || !remoteHistory.remoteHistoryAvailable()));
 
   return {
-    canUndo: (remoteHistory ? remoteHistory.canUndo() : canUndo) && !historyPausedForUploads,
-    canRedo: (remoteHistory ? remoteHistory.canRedo() : canRedo) && !historyPausedForUploads,
+    canUndo: (remoteHistory ? remoteHistory.canUndo() || canRequestRemoteHistory : canUndo) && !historyPausedForUploads,
+    canRedo: (remoteHistory ? remoteHistory.canRedo() || canRequestRemoteHistory : canRedo) && !historyPausedForUploads,
     historyPausedForUploads,
     checkpoints,
-    canonicalHistory,
+    canonicalHistory: historyStale ? [] : canonicalHistory,
     canonicalHistorySupported,
-    canonicalHistoryError,
+    canonicalHistoryError: historyStale ? 'Timeline changed. Open history again.' : canonicalHistoryError,
     refreshCanonicalHistory,
     restoringCanonicalRevisionId,
     restoreCanonicalRevision,

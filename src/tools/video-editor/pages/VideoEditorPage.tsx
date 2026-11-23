@@ -193,6 +193,9 @@ function useEditorTourSelection(): ProviderSelection | null {
   } : null, [running, runId, timelineId, timelineName]);
 }
 
+// A new editor in this document must see writes already started by the editor it replaced.
+let pendingRuntimeProjectSelection: Promise<void> | undefined;
+
 export default function VideoEditorPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   // ---- Reviewed extension bundle + smoke wiring ----------------------------
@@ -377,17 +380,42 @@ export default function VideoEditorPage() {
 
   const tourSelection = useEditorTourSelection();
   const tourHeader = tourSelection ? tourHeaderProps() : null;
-  const lastSelectedRuntimeProject = useRef<string | null>(null);
+  const lastSelectedRuntimeProject = useRef<{ projectId: string } | null>(null);
   useEffect(() => {
-    if (!canSelectRuntimeProject || !projectId || tourSelection || lastSelectedRuntimeProject.current === projectId) return;
-    const timeout = window.setTimeout(() => {
-      if (lastSelectedRuntimeProject.current === projectId) return;
-      lastSelectedRuntimeProject.current = projectId;
-      void new AstridRuntimeClient().selectProject(projectId, "workspace").catch(() => {
-        if (lastSelectedRuntimeProject.current === projectId) lastSelectedRuntimeProject.current = null;
+    if (!canSelectRuntimeProject || !projectId || tourSelection || lastSelectedRuntimeProject.current?.projectId === projectId) return;
+    let active = true;
+    const needsSelection = () => active && timelineSelectionRef.current.projectId === projectId
+      && lastSelectedRuntimeProject.current?.projectId !== projectId;
+    const updateSelection = async () => {
+      // A prior write can change the answer to the current-selection read.
+      const pending = pendingRuntimeProjectSelection;
+      if (pending) await pending;
+      if (!needsSelection()) return;
+      const client = new AstridRuntimeClient();
+      let alreadySelected = false;
+      try {
+        alreadySelected = await client.hasSelectedWorkspaceProject(projectId);
+      } catch {
+        // Missing selections and older Runtime versions still use the selection mutation.
+      }
+      if (!needsSelection()) return;
+      const attempt = { projectId };
+      lastSelectedRuntimeProject.current = attempt;
+      if (alreadySelected) return;
+      const mutation = client.selectProject(projectId, "workspace").then(() => undefined, () => {
+        if (lastSelectedRuntimeProject.current === attempt) lastSelectedRuntimeProject.current = null;
+      }).finally(() => {
+        if (pendingRuntimeProjectSelection === mutation) pendingRuntimeProjectSelection = undefined;
       });
+      pendingRuntimeProjectSelection = mutation;
+    };
+    const timeout = window.setTimeout(() => {
+      void updateSelection();
     }, 500);
-    return () => window.clearTimeout(timeout);
+    return () => {
+      active = false;
+      window.clearTimeout(timeout);
+    };
   }, [projectId, canSelectRuntimeProject, selectorsOpen, tourSelection]);
   // Register explicit replays; first-run welcome already finished before this editor opens.
   useEditorTourHost();

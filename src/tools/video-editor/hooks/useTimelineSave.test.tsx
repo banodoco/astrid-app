@@ -315,6 +315,82 @@ async function setupRefusedSave(status: number) {
 }
 
 describe('useTimelineSave — recovered draft durability', () => {
+  it('permits a guarded save while history is unavailable', async () => {
+    const lockDescriptor = Object.getOwnPropertyDescriptor(navigator, 'locks');
+    Object.defineProperty(navigator, 'locks', { configurable: true, value: {
+      request: async (_name: string, _options: unknown, work: (lock: object) => Promise<unknown>) => work({}),
+    } });
+    const head = { projectId: 'project-commit', timelineId: 'timeline-1', headRevisionId: 'r0', headPublicationId: 'p0' };
+    const config = createDefaultTimelineConfig();
+    const registry = { assets: {} };
+    const base = { revision_id: 'r0', publication_id: 'p0' };
+    const document = acceptedCommit(base, base, { timelineId: head.timelineId }).data.canonical_document;
+    document.parent_revision.payload = { config, clips: [], registry, occurrences: [] };
+    document.parent_revision.content_digest = fixtureDigest(document.parent_revision.payload);
+    const data = await buildTimelineData(config, registry, undefined, 1, undefined, head);
+    const fixture = runtimeFixture({ projectId: head.projectId, timelineId: head.timelineId });
+    const timelinePath = `/v1/projects/${head.projectId}/timelines/${head.timelineId}`;
+    const loadHistory = vi.fn(async (): Promise<never> => { throw new Error('history unavailable'); });
+    const verifiedReads: string[] = [];
+    const posts: Array<{ request: CommitRequest; key: string }> = [];
+    let current = { head: base, canonical_document: document };
+    const runtime = new RuntimeDataProvider({ projectId: head.projectId, transport: async (...args) => {
+      const [method, path, headers, body] = args;
+      const respond = (value: unknown) => ({ status: 200, headers: {}, body: json(value) });
+      if (path === '/v1/handshake') {
+        const response = await fixture.transport(...args);
+        const handshake = JSON.parse(new TextDecoder().decode(response.body));
+        handshake.capabilities.push('timeline.verified_head.v1');
+        return respond(handshake);
+      }
+      if (path.startsWith(`${timelinePath}/commits?`)) return loadHistory();
+      if (method === 'GET' && path === `${timelinePath}/verified-head`) {
+        verifiedReads.push(path);
+        return respond({ project_id: head.projectId, timeline_id: head.timelineId, ...current });
+      }
+      if (method === 'POST' && path === `${timelinePath}/commit`) {
+        const request = JSON.parse(new TextDecoder().decode(body as Uint8Array)) as CommitRequest;
+        const key = headers['Idempotency-Key'];
+        posts.push({ request, key });
+        expect(request).toMatchObject({ base_revision_id: current.head.revision_id, base_publication_id: current.head.publication_id });
+        const accepted = { revision_id: 'r1', publication_id: 'p1' };
+        const response = acceptedCommit(accepted, base, { timelineId: head.timelineId, commands: request.commands });
+        const next = structuredClone(document);
+        next.parent_revision.revision_id = accepted.revision_id;
+        (next.parent_revision.payload.config as typeof config).output.file = 'changed.mp4';
+        next.parent_revision.content_digest = fixtureDigest(next.parent_revision.payload);
+        response.data.canonical_document = next;
+        response.data.document_digest = fixtureDigest(next);
+        response.receipt.idempotency_key = key;
+        current = { head: accepted, canonical_document: next };
+        return respond(response);
+      }
+      return fixture.transport(...args);
+    } });
+    const send = vi.fn(runtime.commitTimeline.bind(runtime));
+    const harness = setup(async () => { throw new Error('legacy save'); }, undefined, { data,
+      loadBasis: runtime.loadTimelineCommandBasis.bind(runtime),
+      capabilities: { loadTimelineCommandHistory: loadHistory, commitTimeline: send,
+        getRecoverableIdentity: runtime.getRecoverableIdentity.bind(runtime) } });
+    try {
+      await vi.waitFor(() => expect(harness.hook.result.current.isTimelineEditingReady(),
+        harness.hook.result.current.localSaveState?.error?.message).toBe(true));
+      const next = await buildTimelineData({ ...config, output: { ...config.output, file: 'changed.mp4' } }, registry, undefined, 1, undefined, head);
+      await act(async () => { harness.hook.result.current.commitData(next, { save: true }); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(600); });
+      await vi.waitFor(() => expect(harness.hook.result.current.localSaveState?.status).toBe('saved'));
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(send.mock.calls[0][0]).toMatchObject({ base_revision_id: 'r0', base_publication_id: 'p0' });
+      expect(loadHistory).not.toHaveBeenCalled();
+      expect(verifiedReads).toContain(`${timelinePath}/verified-head`);
+      expect(posts).toEqual([{ request: send.mock.calls[0][0], key: send.mock.calls[0][1] }]);
+      expect(current.head).toEqual({ revision_id: 'r1', publication_id: 'p1' });
+    } finally {
+      harness.hook.unmount();
+      if (lockDescriptor) Object.defineProperty(navigator, 'locks', lockDescriptor);
+      else Reflect.deleteProperty(navigator, 'locks');
+    }
+  });
   it('clears a bootstrap error to loading while a restarted local owner becomes ready', async () => {
     const lockDescriptor = Object.getOwnPropertyDescriptor(navigator, 'locks');
     Object.defineProperty(navigator, 'locks', { configurable: true, value: {

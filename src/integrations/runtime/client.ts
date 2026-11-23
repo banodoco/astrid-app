@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import {
   ApiError,
   PROTOCOL,
@@ -35,7 +36,8 @@ import {
   RUNTIME_TARGETED_EXECUTION_CAPABILITY,
 } from './contract-metadata.ts';
 import { runtimeApiBase, runtimeOrigin } from './connection.ts';
-import { loadWorkspaceRuntimeConfig } from './workspaceRuntimeConfig.ts';
+import { readLocalWorkspaceProjectSelection } from './localWorkspaceProjectSelection.ts';
+import { loadWorkspaceRuntimeConfig, type WorkspaceRuntimeConfig } from './workspaceRuntimeConfig.ts';
 
 // A client without an explicit `baseUrl` asks `runtimeApiBase()` on every request: same-origin
 // `/api/runtime` locally (the connector/proxy injects the product credential), or the loopback
@@ -53,6 +55,28 @@ export const RUNTIME_CLIENT_SCOPES = [
   'tasks:write',
 ];
 const FORBIDDEN_RUNTIME_ACTORS = new Set(['owner', 'astrid-pack-host', 'admin', 'worker']);
+const workspaceResourceId = /^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$/;
+const workspaceProjectTimestamp = z.iso.datetime({ offset: true })
+  .refine(value => /T\d{2}:\d{2}:\d{2}/.test(value));
+function workspaceProjectText(maxCodePoints: number) {
+  return z.string().min(1).refine(value => Array.from(value).length <= maxCodePoints);
+}
+const workspaceProjectSelectionSchema = z.strictObject({
+  actor_id: z.string().min(1),
+  scope: z.literal('workspace'),
+  project: z.strictObject({
+    project_id: z.string().regex(workspaceResourceId),
+    realm_id: z.string().regex(workspaceResourceId),
+    slug: workspaceProjectText(128),
+    name: workspaceProjectText(512),
+    metadata: z.record(z.string(), z.unknown()),
+    version: z.int().positive(),
+    created_at: workspaceProjectTimestamp,
+    updated_at: workspaceProjectTimestamp,
+    archived: z.boolean().optional(),
+  }),
+  updated_at: z.string().min(1),
+});
 
 export interface RuntimeIdentityBinding {
   actorId: string;
@@ -81,18 +105,22 @@ export type ObservedRuntimeIdentities = Map<string, { actorId?: string; realmId:
 const RESTART_INSTANCE = 'Runtime restarted—relaunch workspace. The selected Runtime instance changed; your timeline draft is preserved.';
 const RESTART_REALM = 'Runtime realm changed—relaunch workspace. The connected Runtime belongs to a different realm; your timeline draft is preserved.';
 const observedRuntimeIdentities: ObservedRuntimeIdentities = new Map();
-let pageRuntimeIdentity: Promise<RuntimeIdentityBinding | undefined> | undefined;
+let pageRuntimeConfig: Promise<WorkspaceRuntimeConfig | undefined> | undefined;
 
-export function initializeWorkspaceRuntimeIdentity(): Promise<RuntimeIdentityBinding | undefined> {
-  if (!pageRuntimeIdentity) {
+function initializeWorkspaceRuntimeConfig(): Promise<WorkspaceRuntimeConfig | undefined> {
+  if (!pageRuntimeConfig) {
     const fetchImpl = globalThis.fetch;
     // The runtime config is served by the local preview proxy, so only same-origin builds read it. The hosted
     // build has no identity compiled in and binds to the first healthy session it sees through the gateway.
-    pageRuntimeIdentity = typeof fetchImpl === 'function' && runtimeOrigin() === ''
+    pageRuntimeConfig = typeof fetchImpl === 'function' && runtimeOrigin() === ''
       ? loadWorkspaceRuntimeConfig(configuredRuntimeIdentity(), fetchImpl.bind(globalThis))
       : Promise.resolve(configuredRuntimeIdentity());
   }
-  return pageRuntimeIdentity;
+  return pageRuntimeConfig;
+}
+
+export function initializeWorkspaceRuntimeIdentity(): Promise<RuntimeIdentityBinding | undefined> {
+  return initializeWorkspaceRuntimeConfig();
 }
 
 type RuntimeSession = { health: Health; handshake: Handshake; realm: Realm };
@@ -703,11 +731,10 @@ export class AstridRuntimeClient {
     }
   }
 
-  private async withSession<T>(operation: () => Promise<T>): Promise<T> {
+  private async withSession<T>(operation: (session: RuntimeSession) => Promise<T>): Promise<T> {
     this.assertNotFenced();
     try {
-      await this.ensureSession();
-      return await operation();
+      return await operation(await this.ensureSession());
     } catch (error) {
       // A restart can happen between reading discovery and reaching the proxy.
       // Retry a catalog read once with fresh discovery and a new handshake.
@@ -717,8 +744,7 @@ export class AstridRuntimeClient {
           || error instanceof RuntimeAuthenticationError
           || error instanceof RuntimeCompatibilityError && error.detail === RESTART_INSTANCE
           || error instanceof ApiError && (error.status === 401 || error.status >= 500))) {
-        await this.reconnect();
-        return operation();
+        return operation(await this.reconnect());
       }
       if (error instanceof ApiError && error.status === 401) {
         this.slot.current = null;
@@ -728,14 +754,14 @@ export class AstridRuntimeClient {
     }
   }
 
-  /** Installer routes use the authenticated connector directly and deliberately skip workspace negotiation. */
-  private async installerUpdateRequest(method: 'GET' | 'POST', path: string): Promise<Uint8Array> {
+  /** Direct extension and installer transport; callers choose whether negotiation is required. */
+  private async directRequest(method: 'GET' | 'POST', path: string, description = 'Installer update', timeoutMs = method === 'GET' ? 8000 : 30_000): Promise<Uint8Array> {
     const headers: Record<string, string> = { Accept: 'application/json' };
     if (this.token) headers.Authorization = `Bearer ${this.token}`;
     let response: { status: number; headers: Record<string, string>; body: Uint8Array };
     if (this.transport) {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(new DOMException(method === 'GET' ? 'Installer update read timed out' : 'Installer update acknowledgement timed out; check status before another action', 'TimeoutError')), method === 'GET' ? 8000 : 30_000);
+      const timeout = setTimeout(() => controller.abort(new DOMException(method === 'GET' ? `${description} read timed out` : `${description} acknowledgement timed out; check status before another action`, 'TimeoutError')), timeoutMs);
       const abortCaller = () => controller.abort(this.signal?.reason);
       if (this.signal?.aborted) abortCaller();
       else this.signal?.addEventListener('abort', abortCaller, { once: true });
@@ -751,7 +777,7 @@ export class AstridRuntimeClient {
       }
     } else {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(new DOMException(method === 'GET' ? 'Installer update read timed out' : 'Installer update acknowledgement timed out; check status before another action', 'TimeoutError')), method === 'GET' ? 8000 : 30_000);
+      const timeout = setTimeout(() => controller.abort(new DOMException(method === 'GET' ? `${description} read timed out` : `${description} acknowledgement timed out; check status before another action`, 'TimeoutError')), timeoutMs);
       const abortCaller = () => controller.abort(this.signal?.reason);
       if (this.signal?.aborted) abortCaller();
       else this.signal?.addEventListener('abort', abortCaller, { once: true });
@@ -794,14 +820,14 @@ export class AstridRuntimeClient {
   /** Read status without schema handshake, and bypass all browser/proxy caches. */
   async readInstallerUpdateStatus(): Promise<InstallerUpdateStatus> {
     return validateInstallerUpdateStatus(JSON.parse(new TextDecoder().decode(
-      await this.installerUpdateRequest('GET', '/v1/update/status'),
+      await this.directRequest('GET', '/v1/update/status'),
     )) as unknown);
   }
 
   /** Read the authenticated startup identity needed to classify the installation. */
   async readInstallerUpdateHealth(): Promise<InstallerUpdateHealth> {
     return validateInstallerUpdateHealth(JSON.parse(new TextDecoder().decode(
-      await this.installerUpdateRequest('GET', '/v1/health'),
+      await this.directRequest('GET', '/v1/health'),
     )) as unknown);
   }
 
@@ -809,7 +835,7 @@ export class AstridRuntimeClient {
   async startInstallerUpdate(): Promise<InstallerUpdateAcceptance> {
     if (this.readOnly) throw new RuntimeCompatibilityError('identity', 'A discovery client cannot start an update.', this.baseUrl);
     return validateInstallerUpdateAcceptance(JSON.parse(new TextDecoder().decode(
-      await this.installerUpdateRequest('POST', '/v1/update'),
+      await this.directRequest('POST', '/v1/update'),
     )) as unknown);
   }
 
@@ -828,6 +854,19 @@ export class AstridRuntimeClient {
 
   async getProject(projectId: string): Promise<Project> {
     return this.withSession(() => this.client.getProject(projectId));
+  }
+
+  async hasSelectedWorkspaceProject(projectId: string): Promise<boolean> {
+    if (runtimeOrigin() !== '' || !this.usesRuntimeConfig || this.readOnly) return false;
+    const config = await initializeWorkspaceRuntimeConfig();
+    if (!config?.localWorkspaceProxy) return false;
+    return this.withSession(async ({ handshake }) => {
+      const selection = workspaceProjectSelectionSchema.safeParse(await readLocalWorkspaceProjectSelection(config, this.signal));
+      return selection.success
+        && selection.data.actor_id === handshake.actor_id
+        && selection.data.project.realm_id === handshake.realm_id
+        && selection.data.project.project_id === projectId;
+    });
   }
 
   async selectProject(projectId: string, scope: 'workspace' | 'user' = 'workspace'): Promise<MutationResult<Record<string, unknown>>> {
@@ -962,6 +1001,17 @@ export class AstridRuntimeClient {
     limit = 50,
   ): Promise<HistoryPage> {
     return this.withSession(() => this.client.listTimelineCommits(projectId, timelineId, cursor, limit));
+  }
+
+  /** The extension is optional only when the authenticated handshake omits it. */
+  async getTimelineVerifiedHead(projectId: string, timelineId: string): Promise<unknown | undefined> {
+    return this.withRetainedRead(async () => {
+      const session = await this.ensureSession();
+      if (!session.handshake.capabilities.includes('timeline.verified_head.v1')) return undefined;
+      const path = `/v1/projects/${encodeURIComponent(projectId)}/timelines/${encodeURIComponent(timelineId)}/verified-head`;
+      const body = await this.directRequest('GET', path, 'Verified timeline head', 120_000);
+      return JSON.parse(new TextDecoder().decode(body)) as unknown;
+    });
   }
 
   async createTimeline(

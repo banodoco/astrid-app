@@ -109,7 +109,8 @@ def build(cfg, client):
     pin = {'document_id': document_id, 'version': transcript['version'], 'content_digest': _digest(content)}
     capture = read_verified_transcript(transport, project, pin)
     bundle.setdefault('source_mapping', {})['pinned_documents'] = [capture]
-    choice = {'source': f'occurrence:{timeline}-occ-0/clip:narration', 'document': pin,
+    narration_index = 1 if shape.get('ripple') else 0
+    choice = {'source': f'occurrence:{timeline}-occ-{narration_index}/clip:narration', 'document': pin,
               'word_ids': [content['segments'][0]['words'][2]['id']]}
     anchor = capture_anchor(bundle, 'parent/clip:element-built-in', 'on', '"w0001"', choice)
     anchor['intent'] = {'anchor': 'follow'}
@@ -151,11 +152,13 @@ def build(cfg, client):
         raise RuntimeError('accepted parent anchor did not retain the transcript pin')
     saved.setdefault('source_mapping', {})['pinned_documents'] = [capture]
     retime = ShotWordRetimeInputs(saved)
-    shot = saved['shots'][f'{timeline}-shot-0000']['internal_timeline']
+    shot = saved['shots'][f'{timeline}-shot-{narration_index:04d}']['internal_timeline']
     targets = []
     for i, word in enumerate(targets_words):
-        child = next(row for row in shot['clips'] if row['id'] == f'footage-0-{i}')
-        selector = (f'{timeline}-occ-0', f'{timeline}-shot-0000', child['id'])
+        target_index = 0 if shape.get('ripple') and i >= 2 else narration_index
+        target_shot = saved['shots'][f'{timeline}-shot-{target_index:04d}']['internal_timeline']
+        child = next(row for row in target_shot['clips'] if row['id'] == f'footage-{target_index}-{i}')
+        selector = (f'{timeline}-occ-{target_index}', f'{timeline}-shot-{target_index:04d}', child['id'])
         try:
             binding, _, _ = retime.resolve(selector, child, 'on', f'"{word[2]}"')
         except (TimingCompileError, ValueError):
@@ -172,19 +175,19 @@ def build(cfg, client):
     if 'clip_target' in cfg and child_count + parent_count != cfg['clip_target']:
         raise RuntimeError('accepted fixture clip count differs from requested count')
     for i in range(2):
-        original = next(row for row in shot['clips'] if row['id'] == f'footage-0-{i}')
+        original = next(row for row in shot['clips'] if row['id'] == f'footage-{narration_index}-{i}')
         overlay = next(row for row in saved['parent']['clips'] if row['id'] == f'overlay-{i}')
-        if overlay['at'] != original['at'] or overlay['hold'] != original['hold']:
+        if overlay['at'] != shape['shots'][narration_index]['on'] + original['at'] or overlay['hold'] != original['hold']:
             raise RuntimeError('accepted overlay does not cover its original')
-    last = saved['placements'][-1]
+    last = saved['placements'][0 if shape.get('ripple') else -1]
     last_shot = saved['shots'][last['shot_id']]['internal_timeline']
     if not any(row['at'] + row['hold'] > last['duration_ms'] / 1000 for row in last_shot['clips']):
         raise RuntimeError('accepted fixture lacks the historical overrun')
     return {'project_id': project, 'timeline_id': timeline, 'accepted_head': reopened['head'],
             'import_receipt_id': imported['receipt']['receipt_id'], 'anchor_receipt_id': result['receipt']['receipt_id'],
             'media': imports, 'transcript_pin': pin, 'targets': targets,
-            'ripple_cut': {'start_seconds': 0.2, 'end_seconds': 0.7,
-                           'later_narration_selector': f'occurrence:{timeline}-occ-0/clip:narration-later'},
+            'ripple_cut': {'start_seconds': shape['shots'][narration_index]['on'] + 0.2, 'end_seconds': shape['shots'][narration_index]['on'] + 0.7,
+                           'later_narration_selector': f'occurrence:{timeline}-occ-{narration_index}/clip:narration-later'},
             'measurements': {'shots': len(saved['placements']), 'child_clips': child_count,
                              'parent_clips': parent_count, 'duration_seconds': shape['durationSeconds']},
             'packs': packs or 'pending: fixture pack elements are not admitted', 'render_verified': False}

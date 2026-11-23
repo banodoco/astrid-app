@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import {
   ApiError,
   PROTOCOL,
@@ -53,6 +54,22 @@ export const RUNTIME_CLIENT_SCOPES = [
   'tasks:write',
 ];
 const FORBIDDEN_RUNTIME_ACTORS = new Set(['owner', 'astrid-pack-host', 'admin', 'worker']);
+const workspaceProjectSelectionSchema = z.object({
+  actor_id: z.string().min(1),
+  scope: z.literal('workspace'),
+  project: z.object({
+    project_id: z.string().min(1),
+    realm_id: z.string().min(1),
+    slug: z.string().min(1),
+    name: z.string().min(1),
+    metadata: z.record(z.string(), z.unknown()),
+    version: z.int().positive(),
+    created_at: z.iso.datetime({ offset: true }),
+    updated_at: z.iso.datetime({ offset: true }),
+    archived: z.boolean().optional(),
+  }),
+  updated_at: z.string().min(1),
+});
 
 export interface RuntimeIdentityBinding {
   actorId: string;
@@ -703,11 +720,10 @@ export class AstridRuntimeClient {
     }
   }
 
-  private async withSession<T>(operation: () => Promise<T>): Promise<T> {
+  private async withSession<T>(operation: (session: RuntimeSession) => Promise<T>): Promise<T> {
     this.assertNotFenced();
     try {
-      await this.ensureSession();
-      return await operation();
+      return await operation(await this.ensureSession());
     } catch (error) {
       // A restart can happen between reading discovery and reaching the proxy.
       // Retry a catalog read once with fresh discovery and a new handshake.
@@ -717,8 +733,7 @@ export class AstridRuntimeClient {
           || error instanceof RuntimeAuthenticationError
           || error instanceof RuntimeCompatibilityError && error.detail === RESTART_INSTANCE
           || error instanceof ApiError && (error.status === 401 || error.status >= 500))) {
-        await this.reconnect();
-        return operation();
+        return operation(await this.reconnect());
       }
       if (error instanceof ApiError && error.status === 401) {
         this.slot.current = null;
@@ -828,6 +843,16 @@ export class AstridRuntimeClient {
 
   async getProject(projectId: string): Promise<Project> {
     return this.withSession(() => this.client.getProject(projectId));
+  }
+
+  hasSelectedWorkspaceProject(projectId: string): Promise<boolean> {
+    return this.withSession(async ({ handshake }) => {
+      const selection = workspaceProjectSelectionSchema.safeParse(await this.client.currentProject());
+      return selection.success
+        && selection.data.actor_id === handshake.actor_id
+        && selection.data.project.realm_id === handshake.realm_id
+        && selection.data.project.project_id === projectId;
+    });
   }
 
   async selectProject(projectId: string, scope: 'workspace' | 'user' = 'workspace'): Promise<MutationResult<Record<string, unknown>>> {

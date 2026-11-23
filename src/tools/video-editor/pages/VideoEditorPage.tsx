@@ -377,17 +377,36 @@ export default function VideoEditorPage() {
 
   const tourSelection = useEditorTourSelection();
   const tourHeader = tourSelection ? tourHeaderProps() : null;
-  const lastSelectedRuntimeProject = useRef<string | null>(null);
+  const lastSelectedRuntimeProject = useRef<{ projectId: string } | null>(null);
   useEffect(() => {
-    if (!canSelectRuntimeProject || !projectId || tourSelection || lastSelectedRuntimeProject.current === projectId) return;
+    if (!canSelectRuntimeProject || !projectId || tourSelection || lastSelectedRuntimeProject.current?.projectId === projectId) return;
+    let active = true;
+    const updateSelection = async () => {
+      const client = new AstridRuntimeClient();
+      let alreadySelected = false;
+      try {
+        alreadySelected = await client.hasSelectedWorkspaceProject(projectId);
+      } catch {
+        // Missing selections and older Runtime versions still use the selection mutation.
+      }
+      if (!active || timelineSelectionRef.current.projectId !== projectId || lastSelectedRuntimeProject.current?.projectId === projectId) return;
+      const attempt = { projectId };
+      lastSelectedRuntimeProject.current = attempt;
+      if (!alreadySelected) {
+        try {
+          await client.selectProject(projectId, "workspace");
+        } catch {
+          if (lastSelectedRuntimeProject.current === attempt) lastSelectedRuntimeProject.current = null;
+        }
+      }
+    };
     const timeout = window.setTimeout(() => {
-      if (lastSelectedRuntimeProject.current === projectId) return;
-      lastSelectedRuntimeProject.current = projectId;
-      void new AstridRuntimeClient().selectProject(projectId, "workspace").catch(() => {
-        if (lastSelectedRuntimeProject.current === projectId) lastSelectedRuntimeProject.current = null;
-      });
+      void updateSelection();
     }, 500);
-    return () => window.clearTimeout(timeout);
+    return () => {
+      active = false;
+      window.clearTimeout(timeout);
+    };
   }, [projectId, canSelectRuntimeProject, selectorsOpen, tourSelection]);
   // Register explicit replays; first-run welcome already finished before this editor opens.
   useEditorTourHost();

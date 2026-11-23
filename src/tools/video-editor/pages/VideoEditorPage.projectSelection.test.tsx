@@ -161,6 +161,7 @@ describe('VideoEditorPage workspace project selection', () => {
     ['an unexpected selection field', response(200, { ...workspaceSelection('project-one'), additional: true })],
     ['an unexpected project field', response(200, { ...workspaceSelection('project-one'), project: { ...workspaceSelection('project-one').project, additional: true } })],
     ['an oversized project slug', response(200, { ...workspaceSelection('project-one'), project: { ...workspaceSelection('project-one').project, slug: 's'.repeat(129) } })],
+    ['an oversized project name', response(200, { ...workspaceSelection('project-one'), project: { ...workspaceSelection('project-one').project, name: 'n'.repeat(513) } })],
     ['an unsupported read', response(405, { code: 'method_not_allowed' })],
   ])('writes the workspace selection after %s', async (_name, selection) => {
     const { writes, readSelection } = setupRuntime();
@@ -168,6 +169,34 @@ describe('VideoEditorPage workspace project selection', () => {
     openEditor();
     await settleSelection();
     expect(writes).toEqual([{ project: 'project-one', scope: 'workspace', key: expect.any(String) }]);
+  });
+
+  it.each(['created_at', 'updated_at'] as const)('writes the workspace selection when project %s omits seconds', async (field) => {
+    const { writes, readSelection } = setupRuntime();
+    const selection = workspaceSelection('project-one');
+    selection.project[field] = '2026-09-11T12:00Z';
+    readSelection.mockResolvedValueOnce(response(200, selection));
+    openEditor();
+    await settleSelection();
+
+    expect(writes).toEqual([{ project: 'project-one', scope: 'workspace', key: expect.any(String) }]);
+  });
+
+  it.each([
+    { field: 'name', limit: 512 },
+    { field: 'slug', limit: 128 },
+  ] as const)('accepts a project $field with $limit Unicode code points', async ({ field, limit }) => {
+    const { writes, readSelection } = setupRuntime();
+    const selection = workspaceSelection('project-one');
+    selection.project[field] = 'a'.repeat(limit - 1) + '🎬';
+    selection.project.created_at = '2026-09-11T12:00:00.123456+00:00';
+    selection.project.updated_at = '2026-09-11T12:00:00.123456+00:00';
+    readSelection.mockResolvedValueOnce(response(200, selection));
+    openEditor();
+    await settleSelection();
+
+    expect(readSelection).toHaveBeenCalledOnce();
+    expect(writes).toEqual([]);
   });
 
   it.each(['switching project', 'unmounting'])('ignores the old pending selection read after %s', async (change) => {

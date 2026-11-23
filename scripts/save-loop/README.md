@@ -210,3 +210,15 @@ one second after the provisional UI marker. The full 85-scenario matrix has not
 completed: repeated guarded cleanup replays history and prevented it from
 finishing. No warm gesture-to-Saved result was established. These rounds do
 not qualify the standard fixture, a warm save target, or a cross-platform run.
+
+For the film-shaped pack fixture, set `SAVE_LOOP_COLLECTION_PACK` to the path
+of the installed `astrid_motion` fixture pack (for example, the Agent checkout's
+`tests/fixtures/packs/astrid_motion`). The Runtime and renderer must also have
+that same pack revision available through their normal pack discovery. The
+builder resolves the collection revision from that source, admits a generated
+project effect, and reports the retained references in the manifest. Pack
+admission and rendering require the Runtime's installed Remotion toolchain.
+
+To run `film-animation-contract.test.mjs`, set `SAVE_LOOP_TEST_PYTHON` to a
+Python interpreter with the Agent package installed (or importable through
+`PYTHONPATH`); it defaults to `python3`.

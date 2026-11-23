@@ -138,15 +138,25 @@ export function prepareFilmFootage({timelineId, shape, selections, legacyWord, n
 }
 
 // Prepare the complete historical import around the reusable footage structure.
-export function prepareFilmImport({projectId, timelineId, shape, selections, legacyWord, narration, mediaSize = {width: 1280, height: 720}, name = 'Generated film-shaped timeline'}) {
+export function prepareFilmImport({projectId, timelineId, shape, selections, legacyWord, narration, collectionElement, mediaSize = {width: 1280, height: 720}, name = 'Generated film-shaped timeline'}) {
   if (!projectId) throw new Error('project, timeline, shape and generated selections are required');
   const {internal, shots, occurrences, clips, parentAssets, used} =
     prepareFilmFootage({timelineId, shape, selections, legacyWord, narration, mediaSize});
   const id = suffix => `${timelineId}-${suffix}`;
   for (const [n, element] of (shape.elements || []).entries()) {
-    clips.push({id: `element-${element.kind}`, clipType: n === 0 ? 'text-card' : 'am-discord',
+    const collection = element.kind === 'collection-pack' && collectionElement;
+    clips.push({id: `element-${element.kind}`, clipType: collection ? collection.id : (n === 0 || collectionElement ? 'text-card' : 'am-discord'),
       track: `V${n + 4}`, at: element.at, hold: element.hold,
-      params: n === 0 ? {content: 'Generated fixture'} : {}});
+      params: collection ? {text: 'Generated fixture'} : (n === 0 || collectionElement ? {content: 'Generated fixture'} : {}),
+      ...(collection ? {elementRef: collection} : {})});
+  }
+  if (collectionElement) {
+    const animations = ['fade', 'fade-up', 'scale-in', 'slide-left', 'slide-up', 'type-on'];
+    const rows = internal.flatMap(row => row.payload.clips).filter(row => row.clipType === 'media').slice(4, 14);
+    if (rows.length !== 10) throw new Error('film fixture needs ten animation clips');
+    rows.forEach((row, i) => { row[i === 4 ? 'exit' : 'entrance'] = {type: i < 6 ? animations[i] : 'fade', duration: 0.2,
+      ...(i >= 6 ? {params: {easing: ['in', 'out', 'in-out', 'step'][i - 6]}} : {})}; });
+    for (const row of internal) row.content_digest = revisionDigest(row.payload);
   }
   const tracks = ['V1', 'V2', 'V3', 'V4', 'V5', 'V6'].map(id => ({id, kind: 'visual', label: id}));
   const config = {output: {resolution: `${mediaSize.width}x${mediaSize.height}`, fps: 30, file: 'output.mp4'}, clips, tracks};

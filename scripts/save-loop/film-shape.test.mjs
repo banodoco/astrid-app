@@ -167,3 +167,40 @@ test('generated small film videos retain the required duration under the import 
     }
   } finally { fs.rmSync(scratch, {recursive: true, force: true}); }
 });
+
+test('film videos have a sub-10 MiB duration-based rate budget and short GOP', async () => {
+  const {filmMediaCommands, filmMediaDurations} = await import('./film-shape.mjs');
+  for (const count of [23, 621]) {
+    const {audioDuration, videoDuration} = filmMediaDurations(filmFixtureShape(count));
+    const commands = filmMediaCommands({width: 1280, height: 720}, 'a.mp4', 'a.wav', 'a.png', 'b.mp4', 'b.png', audioDuration, videoDuration);
+    for (const command of [commands[0], commands[3]]) {
+      const rate = Number(command[command.indexOf('-maxrate') + 1]);
+      assert.ok(rate * videoDuration / 8 <= 8 * 1024 ** 2);
+      assert.equal(command[command.indexOf('-g') + 1], '15');
+    }
+  }
+});
+
+test('default-resolution film videos stay under 10 MiB with every frame', async () => {
+  const {filmMediaCommands, filmMediaDurations} = await import('./film-shape.mjs');
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'film-default-budget-test-'));
+  try {
+    for (const count of [23, 621]) {
+      const {audioDuration, videoDuration} = filmMediaDurations(filmFixtureShape(count));
+      const video = path.join(scratch, `${count}.mp4`);
+      const [command] = filmMediaCommands({width: 1280, height: 720}, video, 'unused.wav', 'unused.png', undefined, undefined, audioDuration, videoDuration);
+      const encode = spawnSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', ...command], {encoding: 'utf8'});
+      assert.equal(encode.status, 0, encode.stderr);
+      assert.ok(fs.statSync(video).size < 10 * 1024 ** 2);
+      const probe = spawnSync('ffprobe', ['-v', 'error', '-count_frames', '-select_streams', 'v:0', '-show_entries',
+        'stream=width,height,r_frame_rate,nb_read_frames,duration', '-of', 'json', video], {encoding: 'utf8'});
+      assert.equal(probe.status, 0, probe.stderr);
+      const stream = JSON.parse(probe.stdout).streams[0];
+      assert.equal(stream.width, 1280);
+      assert.equal(stream.height, 720);
+      assert.equal(stream.r_frame_rate, '15/1');
+      assert.equal(Number(stream.nb_read_frames), videoDuration * 15);
+      assert.ok(Math.abs(Number(stream.duration) - videoDuration) < 0.1);
+    }
+  } finally { fs.rmSync(scratch, {recursive: true, force: true}); }
+});

@@ -19,8 +19,8 @@ from astrid.sdk.media_transcript import build_transcript, transcript_document_id
 from astrid.sdk.timeline.commit import bundle_from_document
 from astrid.sdk.timeline.native_source_inputs import read_verified_transcript
 from astrid.sdk.timeline.native_word_anchor import capture_anchor
-from astrid.sdk.timeline._shot_word_retime import ShotWordRetimeInputs
-from astrid.sdk.timeline.compiler import TimingCompileError
+from astrid.sdk.timeline._shot_word_retime import ShotWordRetimeInputs, require_retime_word_scope
+from astrid.core.timeline import moments
 from astrid.core.timeline.authoring_bundle import _digest
 
 
@@ -28,6 +28,25 @@ def data(value):
     if not isinstance(value, Mapping):
         raise RuntimeError('Runtime returned a non-object')
     return dict(value.get('data', value))
+
+
+def prove_target(retime, selector, child, word, document_id, source, word_id, ambiguous):
+    """Check ambiguity in the same authenticated word pool used by retiming."""
+    moment = moments.parse(f'"{word}"')
+    pool, captures = retime.words
+    require_retime_word_scope(retime.bundle, captures, moment.line)
+    hits = moments.find_words(moment, pool)
+    if ambiguous:
+        if len(hits) <= 1:
+            raise RuntimeError('expected ambiguous word')
+        return 'ambiguous'
+    if len(hits) != 1:
+        raise RuntimeError('expected unique word')
+    binding, _, _ = retime.resolve(selector, child, 'on', f'"{word}"')
+    if (binding.document_id != document_id or binding.source != source
+            or binding.word_ids != (word_id,)):
+        raise RuntimeError('unexpected word resolution')
+    return 'resolved'
 
 
 def build(cfg, client):
@@ -74,7 +93,7 @@ def build(cfg, client):
             imports.append({'kind': kind, 'selection': selected, 'receipt_id': receipt['receipt_id']})
     shape = cfg['shape']
     max_hold = max(child['hold'] for shot in shape['shots'] for child in shot['children'])
-    if min(p['metadata']['duration_seconds'] for p in pins['video']) < max_hold or pins['audio'][0]['metadata']['duration_seconds'] < shape['shots'][0]['duration']:
+    if min(p['metadata']['duration_seconds'] for p in pins['video']) < max_hold or pins['audio'][0]['metadata']['duration_seconds'] < shape['shots'][1 if shape.get('ripple') else 0]['duration']:
         raise RuntimeError('generated sources are too short for fixture clips')
     words = [[0.01, 0.04, 'repeat'], [0.05, 0.08, 'repeat'], [0.1, 0.2, 'w0001'], [1.1, 1.2, 'w0002']]
     targets_words = [words[2], words[3], words[0], words[1]]
@@ -90,6 +109,7 @@ def build(cfg, client):
             'legacyWord': {'documentId': document_id, 'text': 'w0001', 'at': 0.1, 'content': content},
             'mediaSize': {'width': pins['video'][0]['metadata']['width'], 'height': pins['video'][0]['metadata']['height']},
             'narration': {'selection': pins['audio'][0], 'image': pins['image'][0],
+                          **({'overlayImage': pins['image'][1]} if len(pins['image']) > 1 else {}),
                           'words': [{'text': w[2], 'at': w[0]} for w in targets_words],
                           'splitAt': {'gapStart': 0.2, 'gapEnd': 0.7}}}
     js = "const {prepareFilmImport}=await import(process.argv[1]);let s='';for await(const x of process.stdin)s+=x;console.log(JSON.stringify(prepareFilmImport(JSON.parse(s))));"
@@ -159,16 +179,10 @@ def build(cfg, client):
         target_shot = saved['shots'][f'{timeline}-shot-{target_index:04d}']['internal_timeline']
         child = next(row for row in target_shot['clips'] if row['id'] == f'footage-{target_index}-{i}')
         selector = (f'{timeline}-occ-{target_index}', f'{timeline}-shot-{target_index:04d}', child['id'])
-        try:
-            binding, _, _ = retime.resolve(selector, child, 'on', f'"{word[2]}"')
-        except (TimingCompileError, ValueError):
-            if i < 2:
-                raise
-            status = 'ambiguous'
-        else:
-            if i >= 2 or binding.document_id != document_id:
-                raise RuntimeError('unexpected word resolution')
-            status = 'resolved'
+        source = (f'{timeline}-occ-{narration_index}', f'{timeline}-shot-{narration_index:04d}',
+                  'narration-later' if i == 1 else 'narration')
+        status = prove_target(retime, selector, child, word[2], document_id, source,
+                              content['segments'][0]['words'][i + 2 if i < 2 else i - 2]['id'], i >= 2)
         targets.append({'selector': list(selector), 'kind': 'image' if i == 0 else 'video', 'word': word[2], 'status': status})
     child_count = sum(len(s['internal_timeline']['clips']) for s in saved['shots'].values())
     parent_count = len(saved['parent']['clips'])
@@ -179,6 +193,20 @@ def build(cfg, client):
         overlay = next(row for row in saved['parent']['clips'] if row['id'] == f'overlay-{i}')
         if overlay['at'] != shape['shots'][narration_index]['on'] + original['at'] or overlay['hold'] != original['hold']:
             raise RuntimeError('accepted overlay does not cover its original')
+        if len(pins['image']) > 1 and len(pins['video']) > 1:
+            original_asset = shot['registry']['assets'][original['asset']]
+            overlay_asset = saved['parent']['registry']['assets'][overlay['asset']]
+            kind = 'image' if i == 0 else 'video'
+            if (original_asset['type'] != kind or overlay_asset['type'] != kind
+                    or original_asset['media_id'] == overlay_asset['media_id']):
+                raise RuntimeError('accepted overlay is not a distinct same-kind media swap')
+            for asset in (original_asset, overlay_asset):
+                pin = next((p for p in pins[kind] if p['object_id'] == asset['media_id']), None)
+                if (not pin or asset.get('generationId') != pin['generation_id']
+                        or asset.get('variantId') != pin['variant_id']
+                        or asset.get('resolution') != f"{pin['metadata']['width']}x{pin['metadata']['height']}"
+                        or (kind == 'video' and asset.get('duration') != pin['metadata']['duration_seconds'])):
+                    raise RuntimeError('accepted overlay media identity or metadata differs from import')
     last = saved['placements'][0 if shape.get('ripple') else -1]
     last_shot = saved['shots'][last['shot_id']]['internal_timeline']
     if not any(row['at'] + row['hold'] > last['duration_ms'] / 1000 for row in last_shot['clips']):

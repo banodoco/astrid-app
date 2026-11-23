@@ -18,8 +18,9 @@ export function parseFixtureOptions(args = [], env = {}) {
   if (!['standard', 'large-shots', 'film-shaped'].includes(variant)) throw new Error(`invalid variant: ${variant}`);
   if (prepareMedia && variant !== 'film-shaped') throw new Error('--prepare-media requires --variant film-shaped');
   const count = Number(options['--clips'] ?? env.SAVE_LOOP_CLIPS ?? (variant === 'film-shaped' ? 621 : 616));
-  if (!Number.isSafeInteger(count) || count < (variant === 'film-shaped' ? 36 : 616))
-    throw new Error(`invalid clip count: ${count}`);
+  const minimum = variant === 'film-shaped' ? 23 : 616;
+  if (!Number.isSafeInteger(count) || count < minimum)
+    throw new Error(`invalid clip count: ${count}; minimum is ${minimum}`);
   const size = options['--media-size'] ?? env.SAVE_LOOP_MEDIA_SIZE ?? '1280x720';
   const match = /^(\d+)x(\d+)$/.exec(size);
   const width = Number(match?.[1]), height = Number(match?.[2]);
@@ -30,13 +31,15 @@ export function parseFixtureOptions(args = [], env = {}) {
 
 // Use the same generated sources and encoding as the standard large-shots
 // fixture. The source is longer than any single shot in filmShape.
-export function filmMediaCommands({width, height}, video, audio, image) {
+export function filmMediaCommands({width, height}, video, audio, image, video2, image2, audioDuration = 90, videoDuration = 90) {
   return [
-    ['-f', 'lavfi', '-i', `testsrc2=s=${width}x${height}:r=15:d=90`, '-c:v', 'libx264',
+    ['-f', 'lavfi', '-i', `testsrc2=s=${width}x${height}:r=15:d=${videoDuration}`, '-c:v', 'libx264',
       '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-y', video],
-    ['-f', 'lavfi', '-i', 'sine=frequency=317:sample_rate=44100:duration=90', '-y', audio],
+    ['-f', 'lavfi', '-i', `sine=frequency=317:sample_rate=44100:duration=${audioDuration}`, '-y', audio],
     ['-f', 'lavfi', '-i', `testsrc2=s=${width}x${height}:r=1`, '-frames:v', '1',
       '-threads', '1', '-y', image],
+    ...(video2 ? [['-f', 'lavfi', '-i', `color=c=blue:s=${width}x${height}:r=15:d=${videoDuration}`, '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-y', video2]] : []),
+    ...(image2 ? [['-f', 'lavfi', '-i', `color=c=blue:s=${width}x${height}:r=1`, '-frames:v', '1', '-threads', '1', '-y', image2]] : []),
   ];
 }
 
@@ -49,9 +52,13 @@ export function filmShape({clipCount = 621, shotCount = 46, ripple = false} = {}
   const n = Math.min(shotCount, clipCount - 5, frames);
   const children = clipCount - 5;
   const shots = Array.from({length: n}, (_, index) => {
-    const startFrame = Math.floor(index * frames / n);
-    const endFrame = Math.floor((index + 1) * frames / n);
-    const count = Math.floor((index + 1) * children / n) - Math.floor(index * children / n);
+    const boundary = i => ripple && n > 1 && i > 0
+      ? 127 + Math.floor((i - 1) * (frames - 127) / (n - 1)) : Math.floor(i * frames / n);
+    const startFrame = boundary(index);
+    const endFrame = boundary(index + 1);
+    const count = ripple && n > 1 && children < 12 * n
+      ? (index === 0 ? 12 : Math.floor(index * (children - 12) / (n - 1)) - Math.floor((index - 1) * (children - 12) / (n - 1)))
+      : Math.floor((index + 1) * children / n) - Math.floor(index * children / n);
     const slots = Math.ceil(count / 4);
     const rows = Array.from({length: count}, (_, childIndex) => {
       const start = Math.floor(Math.floor(childIndex / 4) * (endFrame - startFrame) / slots);
@@ -65,7 +72,9 @@ export function filmShape({clipCount = 621, shotCount = 46, ripple = false} = {}
   if (ripple) {
     if (shots.length < 2 || shots[0].children.length < 12) throw new Error('ripple fixture needs two populated shots');
     shots[0].duration = 4.2;
-    shots[0].children.at(-1).hold -= 1 / 30;
+    for (const child of shots[0].children) {
+      if (child.at + child.hold > shots[0].duration) child.hold = shots[0].duration - child.at;
+    }
     shots[0].children.splice(11, 1);
     shots.slice(1).forEach(shot => shot.on -= 1 / 30);
   }
@@ -75,4 +84,13 @@ export function filmShape({clipCount = 621, shotCount = 46, ripple = false} = {}
   const elements = ['built-in', 'collection-pack', 'project-pack'].map((kind, index) =>
     ({kind, at: 10 + index * 3, hold: 2}));
   return {durationSeconds: frames / 30, shots, overlays, elements, ...(ripple ? {ripple: true} : {})};
+}
+
+// The builder adds two narration clips after constructing the base shape.
+export function filmFixtureShape(clipTarget) {
+  if (!Number.isSafeInteger(clipTarget) || clipTarget < 23)
+    throw new Error('film fixture minimum clip count is 23');
+  const clipCount = clipTarget - 2;
+  const shotCount = Math.min(46, Math.floor((clipTarget - 4) / 8), 1 + Math.floor((clipCount - 17) / 4));
+  return filmShape({ripple: true, clipCount, shotCount});
 }

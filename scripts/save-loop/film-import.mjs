@@ -57,7 +57,7 @@ export function prepareFilmFootage({timelineId, shape, selections, legacyWord, n
   const narrationShot = shape.ripple ? 1 : 0;
   let index = 0;
   const internal = [], shots = [], occurrences = [], used = new Set();
-  const original = new Map();
+  const original = new Map(), originalPins = new Map();
   for (const shot of shape.shots) {
     const suffix = String(shot.index).padStart(4, '0');
     const shotId = id(`shot-${suffix}`), shotRevision = id(`shot-rev-${suffix}`), internalRevision = id(`internal-rev-${suffix}`);
@@ -90,6 +90,7 @@ export function prepareFilmFootage({timelineId, shape, selections, legacyWord, n
         row.app = {astrid: {on: '"repeat"', for: row.hold}};
       }
       original.set(`${shot.index}:${child.index}`, row);
+      originalPins.set(`${shot.index}:${child.index}`, pin);
       return row;
     });
     const payload = {tracks: Array.from({length: 4}, (_, n) => ({id: `LV${n + 1}`, kind: 'visual', label: `LV${n + 1}`})),
@@ -142,8 +143,11 @@ export function prepareFilmFootage({timelineId, shape, selections, legacyWord, n
   const clips = shape.overlays.map((overlay, n) => {
     const row = original.get(`${overlay.shotIndex}:${overlay.childIndex}`);
     if (!row) throw new Error('overlay references a missing original');
-    const pin = selections[index++ % selections.length];
-    parentAssets[pin.asset] = binding(pin); used.add(pin.object_id);
+    const originalPin = originalPins.get(`${overlay.shotIndex}:${overlay.childIndex}`);
+    const isImage = originalPin === narration?.image;
+    const pin = isImage ? (narration.overlayImage || selections[index++ % selections.length]) :
+      (selections.find(candidate => candidate.object_id !== originalPin.object_id) || selections[index++ % selections.length]);
+    parentAssets[pin.asset] = binding(pin, isImage && narration.overlayImage ? 'image' : 'video'); used.add(pin.object_id);
     return {id: `overlay-${n}`, clipType: 'media', track: `V${n + 2}`, asset: pin.asset,
       at: shape.shots[overlay.shotIndex].on + row.at, hold: row.hold, from: 0, to: row.hold, speed: 1,
       entrance: {type: 'fade', duration: 0.2, params: {easing: n ? 'in' : 'out'}}};

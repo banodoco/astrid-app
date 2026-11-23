@@ -5,7 +5,31 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {filmShape, parseFixtureOptions} from './film-shape.mjs';
+import {filmShape, filmFixtureShape, parseFixtureOptions} from './film-shape.mjs';
+
+test('production ripple shapes support small requested counts with valid geometry', () => {
+  for (const count of [23, 24, 36, 42, 621]) {
+    const shape = filmFixtureShape(count);
+    assert.equal(shape.shots.flatMap(shot => shot.children).length + shape.overlays.length + shape.elements.length + 3, count);
+    assert.equal(shape.shots[0].duration, 4.2);
+    for (const [i, shot] of shape.shots.entries()) {
+      if (i) assert.ok(Math.abs(shot.on - shape.shots[i - 1].on - shape.shots[i - 1].duration) < 1e-9);
+      for (const child of shot.children) assert.ok(child.at >= 0 && child.hold > 0 && child.at + child.hold <= shot.duration + 1e-9);
+    }
+  }
+});
+
+test('invalid film geometry fails before media creation', () => {
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'film-invalid-test-'));
+  try {
+    const builder = fileURLToPath(new URL('./build-fixture.mjs', import.meta.url));
+    const result = spawnSync(process.execPath, [builder, '--variant', 'film-shaped', '--clips', '1000000', '--prepare-media'],
+      {encoding: 'utf8', env: {PATH: process.env.PATH, SAVE_LOOP_SCRATCH: scratch}});
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /too many clips/);
+    assert.deepEqual(fs.readdirSync(scratch), []);
+  } finally { fs.rmSync(scratch, {recursive: true, force: true}); }
+});
 
 test('film options have useful defaults and explicit options override environment', () => {
   assert.deepEqual(parseFixtureOptions(['--variant', 'film-shaped']),
@@ -80,4 +104,19 @@ test('configurable counts preserve total and duration', () => {
   }
   assert.throws(() => filmShape({clipCount: 7}));
   assert.throws(() => filmShape({shotCount: 0}));
+});
+
+test('film fixture minimum is enforced before creating media', () => {
+  const shape = filmFixtureShape(23);
+  assert.equal(shape.shots.length, 2);
+  assert.equal(shape.shots[0].children.length, 11);
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'film-minimum-test-'));
+  try {
+    const builder = fileURLToPath(new URL('./build-fixture.mjs', import.meta.url));
+    const result = spawnSync(process.execPath, [builder, '--variant', 'film-shaped', '--clips', '22', '--prepare-media'],
+      {encoding: 'utf8', env: {PATH: process.env.PATH, SAVE_LOOP_SCRATCH: scratch}});
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /minimum.*23/i);
+    assert.deepEqual(fs.readdirSync(scratch), []);
+  } finally { fs.rmSync(scratch, {recursive: true, force: true}); }
 });

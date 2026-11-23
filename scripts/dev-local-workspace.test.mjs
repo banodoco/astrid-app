@@ -1242,6 +1242,23 @@ test('mismatched, unavailable, malformed, or ended startup observations cannot s
   }
 });
 
+test('an ended pending operation with a successor that fails identity validation cannot start or stop services', async () => {
+  const fixture = await launchFixture({ discoveryState: 'missing', healthInstanceId: 'successor-instance' });
+  writeFileSync(fixture.env.FAKE_RUNTIME_STATUS_RELEASE_FILE, 'publish successor');
+  try {
+    const result = await launcherEnds({ fixture, env: {
+      ASTRID_APP_LOOPBACK_ORIGIN: 'off', FAKE_RUNTIME_UP_PENDING: '1',
+    } });
+    assert.equal(result.code, 1, result.stderr);
+    assert.match(result.stderr, /instance does not match/);
+    assert.deepEqual(runtimeCliCalls(fixture).map(({ action }) => action), ['up', 'startup-status', 'startup-status']);
+    assert.deepEqual(fixture.requests.map(({ path }) => path), ['/v1/health']);
+    assert.equal(result.spawned, '', 'App services started from a successor with a different Runtime identity');
+    assert(!result.stdout.includes('Open '), 'ready output appeared for a successor with a different Runtime identity');
+    assert.equal(readFileSync(fixture.env.FAKE_RUNTIME_LIFECYCLE_LOG, 'utf8'), '', 'launcher stopped the observed successor');
+  } finally { await fixture.close(); }
+});
+
 test('interrupting a pending operation while status is in flight exits without another observation or cleanup', async () => {
   const fixture = await launchFixture({ discoveryState: 'missing' });
   let started;

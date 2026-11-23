@@ -34,7 +34,16 @@ export function resolveEditorPackRevisions(selectedCheckout?: string, vendorRoot
     const { pack_id: packId, manifest } = editors[0];
     if (typeof packId !== 'string' || !/^[a-z][a-z0-9_]*$/.test(packId)
       || typeof manifest?.path !== 'string' || !Object.prototype.hasOwnProperty.call(files, `astrid/packs/${packId}/${manifest.path}`)) return null;
-    return { [packId]: commit };
+    // The editor eagerly bundles the vendored element modules through the glob
+    // in astrid-element-components.tsx. Their owners can differ from the host
+    // tool's pack; report only pack paths present in this build's provenance.
+    const packIds = new Set([packId]);
+    for (const file of Object.keys(files)) {
+      if (/\.test\.(?:ts|tsx)$/.test(file)) continue;
+      const match = /^astrid\/packs\/([a-z][a-z0-9_]*)\/(?:rendering\/)?elements\/.+\.(?:ts|tsx)$/.exec(file);
+      if (match) packIds.add(match[1]);
+    }
+    return Object.fromEntries([...packIds].map((id) => [id, commit]));
   } catch {
     return null;
   }

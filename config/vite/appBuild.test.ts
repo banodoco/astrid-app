@@ -1,8 +1,8 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { createAppBuildPlugin, resolveAppBuildInfo } from './appBuild';
+import { createAppBuildPlugin, resolveAppBuildInfo, resolveEditorPackRevisions } from './appBuild';
 
 describe('App build info', () => {
   it('keeps the App build independent and binds release to the supplied manifest', () => {
@@ -78,6 +78,16 @@ describe('App build info', () => {
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
+  });
+
+  it('includes the owners of element modules bundled by the editor', () => {
+    const vendorRoot = path.resolve(__dirname, '../../vendor/astrid-browser');
+    const { astrid_commit: commit } = JSON.parse(readFileSync(path.join(vendorRoot, 'provenance.json'), 'utf8'));
+    expect(resolveEditorPackRevisions(vendorRoot, vendorRoot)).toMatchObject({
+      astrid_motion: commit,
+      rendering: commit,
+      local: commit,
+    });
   });
 
 });

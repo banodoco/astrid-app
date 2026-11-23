@@ -70,7 +70,7 @@ describe('TimelineEditorShellToolbar', () => {
   });
 
   describe('the save badge', () => {
-    const renderToolbar = (saveStatus: 'saved' | 'saving' | 'dirty' | 'retrying' | 'error', unsaved = false, timelineLoaded = false) => {
+    const renderToolbar = (saveStatus: 'saved' | 'saving' | 'dirty' | 'retrying' | 'error', unsaved = false, timelineLoaded = true) => {
       const store = createTimelineStore();
       store.setState((state) => ({ chrome: { ...state.chrome, saveStatus, saveBar: unsaved ? { kind: 'refused' as const, headline: 'x' } : null } }));
       return render(

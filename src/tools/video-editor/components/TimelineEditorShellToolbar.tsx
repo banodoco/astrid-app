@@ -1,4 +1,4 @@
-import type { Dispatch, PointerEvent as ReactPointerEvent, ReactNode, SetStateAction } from 'react';
+import { useLayoutEffect, type Dispatch, type PointerEvent as ReactPointerEvent, type ReactNode, type SetStateAction } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 import { GripHorizontal, History, Maximize2, Minimize2, Redo2, Undo2, ZoomIn, ZoomOut } from 'lucide-react';
 import { Badge } from '@/shared/components/ui/badge.tsx';
@@ -11,6 +11,7 @@ import { runtimeOrigin } from '@/integrations/runtime/connection.ts';
 import { useEditorTourRunning } from '@/shared/state/editorTourStore.ts';
 import { useTimelineChromeContext } from '@/tools/video-editor/hooks/timelineStore.ts';
 import { clampTimelineScaleWidth, TIMELINE_ZOOM_STEP } from '@/tools/video-editor/lib/timeline-scale.ts';
+import { recordLatestTimelineSavedBadgeMark } from '@/tools/video-editor/lib/timeline-save-marks.ts';
 
 const STATUS_VARIANT = {
   loading: 'secondary',
@@ -152,11 +153,18 @@ export function TimelineEditorShellToolbar({
   const hostedSaveWaiting = runtimeOrigin() !== '' && chrome.saveStatus === 'error' && !chrome.schemaIncompatible;
   // Whatever the bar shows is unsaved work, so the badge never says "Saved" beside it.
   const notSaved = Boolean(chrome.saveBar) || ((recoveryCardShowing || hostedSaveWaiting) && chrome.saveStatus !== 'saved');
+  useLayoutEffect(() => {
+    if (statusVisible && !tourRunning && !notSaved && chrome.saveStatus === 'saved') {
+      recordLatestTimelineSavedBadgeMark();
+    }
+  }, [chrome.saveStatus, notSaved, statusVisible, tourRunning]);
+  const readableSaveStatus = statusVisible ? (notSaved ? 'not-saved' : chrome.saveStatus) : undefined;
   const saveBadge = (
     <Badge
       variant={notSaved ? 'outline' : STATUS_VARIANT[chrome.saveStatus]}
       className={cn('h-5 px-1.5 text-[10px]', notSaved ? 'text-muted-foreground' : 'capitalize', !statusVisible && 'invisible')}
       aria-hidden={!statusVisible || undefined}
+      data-timeline-save-status={readableSaveStatus}
     >
       {notSaved ? 'Not saved' : chrome.saveStatus}
     </Badge>
@@ -288,6 +296,7 @@ export function TimelineEditorShellToolbar({
           armedGestureControl && 'pl-1',
         )}
         data-toolbar-layout="touch"
+        data-timeline-save-status={readableSaveStatus}
       >
         {armedGestureControl ? (
           armedGestureControl
@@ -321,6 +330,7 @@ export function TimelineEditorShellToolbar({
         touchChrome ? 'min-h-11 py-1' : 'h-7',
         (condensed || armedGestureControl) && 'h-auto flex-wrap',
       )}
+      data-timeline-save-status={readableSaveStatus}
     >
       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
         {saveBadge}

@@ -62,6 +62,32 @@ function request(baseRevisionId = 'r0', basePublicationId = 'p0') {
 }
 
 describe('Runtime timeline commit capability', () => {
+  it('marks the Runtime commit request at dispatch with a private save correlation', async () => {
+    const requests: Array<{ method: string; path: string; body?: unknown }> = [];
+    const response = accepted('r1', 'p1', 'r0', 'p0');
+    const previousMarks = new Set(performance.getEntriesByType('mark').map((entry) => entry.name));
+    let markedBeforeTransport = false;
+    const baseTransport = transportFor(response, requests);
+    const transport: Transport = async (...args) => {
+      if (args[1].endsWith('/commit')) {
+        markedBeforeTransport = performance.getEntriesByType('mark')
+          .some((entry) => /^astrid\.save\.\d+\.post-sent$/.test(entry.name) && !previousMarks.has(entry.name));
+      }
+      return baseTransport(...args);
+    };
+    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, baseUrl: 'http://runtime.test', token: 'token', transport });
+    provider.setShotTimelineTraceId('private-timeline-trace');
+
+    await provider.commitTimeline(request(), 'key-p1');
+
+    const postMark = performance.getEntriesByType('mark').find((entry) =>
+      /^astrid\.save\.\d+\.post-sent$/.test(entry.name) && !previousMarks.has(entry.name));
+    expect(markedBeforeTransport).toBe(true);
+    expect(postMark?.name).toMatch(/^astrid\.save\.\d+\.post-sent$/);
+    expect(postMark?.name).not.toContain('private-timeline-trace');
+    if (postMark) performance.clearMarks(postMark.name);
+  });
+
   it('projects the exact accepted closure and retains publication identity without a latest read', async () => {
     const requests: Array<{ method: string; path: string; body?: unknown }> = [];
     const provider = new RuntimeDataProvider({

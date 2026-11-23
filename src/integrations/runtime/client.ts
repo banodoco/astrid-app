@@ -55,18 +55,23 @@ export const RUNTIME_CLIENT_SCOPES = [
 ];
 const FORBIDDEN_RUNTIME_ACTORS = new Set(['owner', 'astrid-pack-host', 'admin', 'worker']);
 const workspaceResourceId = /^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$/;
+const workspaceProjectTimestamp = z.iso.datetime({ offset: true })
+  .refine(value => /T\d{2}:\d{2}:\d{2}/.test(value));
+function workspaceProjectText(maxCodePoints: number) {
+  return z.string().min(1).refine(value => Array.from(value).length <= maxCodePoints);
+}
 const workspaceProjectSelectionSchema = z.strictObject({
   actor_id: z.string().min(1),
   scope: z.literal('workspace'),
   project: z.strictObject({
     project_id: z.string().regex(workspaceResourceId),
     realm_id: z.string().regex(workspaceResourceId),
-    slug: z.string().min(1).max(128),
-    name: z.string().min(1).max(512),
+    slug: workspaceProjectText(128),
+    name: workspaceProjectText(512),
     metadata: z.record(z.string(), z.unknown()),
     version: z.int().positive(),
-    created_at: z.iso.datetime({ offset: true }),
-    updated_at: z.iso.datetime({ offset: true }),
+    created_at: workspaceProjectTimestamp,
+    updated_at: workspaceProjectTimestamp,
     archived: z.boolean().optional(),
   }),
   updated_at: z.string().min(1),

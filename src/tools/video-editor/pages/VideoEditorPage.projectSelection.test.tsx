@@ -2,22 +2,13 @@ import React from 'react';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, useSearchParams } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Transport } from '@/integrations/runtime/generated.ts';
+import type { RequestBody, Transport } from '@/integrations/runtime/generated.ts';
 import { json, runtimeFixture } from '@/test/fakeWorkspaceRuntime.ts';
-import { FAKE_RUNTIME_ACTOR_ID, FAKE_RUNTIME_REALM_ID } from '@/test/fakeRuntimeIdentity.mjs';
-import VideoEditorPage from './VideoEditorPage.tsx';
+import { FAKE_RUNTIME_ACTOR_ID, FAKE_RUNTIME_INSTANCE_ID, FAKE_RUNTIME_REALM_ID } from '@/test/fakeRuntimeIdentity.mjs';
 
-const runtime = vi.hoisted(() => ({ transport: vi.fn<Transport>() }));
+let VideoEditorPage: typeof import('./VideoEditorPage.tsx').default;
+let setRuntimeOrigin: typeof import('@/integrations/runtime/connection.ts').setRuntimeOrigin;
 
-vi.mock('@/integrations/runtime/client.ts', async (importOriginal) => {
-  const original = await importOriginal<typeof import('@/integrations/runtime/client.ts')>();
-  return {
-    ...original,
-    AstridRuntimeClient: class extends original.AstridRuntimeClient {
-      constructor() { super({ baseUrl: 'http://runtime.test', transport: runtime.transport }); }
-    },
-  };
-});
 vi.mock('../hooks/useRuntimeEditorDiscovery.ts', () => {
   const projects = [
     { project_id: 'project-one', name: 'First project', slug: 'first-project', metadata: {} },
@@ -53,6 +44,10 @@ vi.mock('../components/AstridVideoEditorShell.tsx', () => ({
 
 const SELECTION_ROUTE = '/v1/projects/selection';
 const SELECTED_AT = '2026-09-11T00:00:00Z';
+const HOSTED_RUNTIME_ORIGIN = 'http://127.0.0.1:17340';
+const WORKSPACE_CONFIG_ROUTE = '/runtime-config/v1/workspace.json';
+const LOCAL_WORKSPACE_ORIGIN_HEADER = 'x-astrid-local-workspace-origin';
+type RuntimeRoute = 'local proxy' | 'paired relay' | 'hosted door';
 const workspaceSelection = (projectId: string) => ({
   actor_id: FAKE_RUNTIME_ACTOR_ID,
   scope: 'workspace',
@@ -64,23 +59,43 @@ const workspaceSelection = (projectId: string) => ({
 });
 const response = (status: number, value: unknown) => ({ status, headers: {}, body: json(value) });
 
-function setupRuntime(initialProject: string | null = null) {
+function setupRuntime(initialProject: string | null = null, beforeWrite?: (projectId: string) => Promise<void>, route: RuntimeRoute = 'local proxy') {
   const fixture = runtimeFixture();
   let selectedProject = initialProject;
   const writes: Array<{ project: string; scope: string; key: string | undefined }> = [];
   const readSelection = vi.fn(async () => selectedProject
     ? response(200, workspaceSelection(selectedProject))
     : response(404, { code: 'not_found', message: 'no project is selected' }));
-  runtime.transport.mockImplementation(async (method, path, headers, body) => {
+  const transport: Transport = async (method, path, headers, body) => {
     if (path !== SELECTION_ROUTE) return fixture.transport(method, path, headers, body);
     if (method === 'GET') return readSelection();
     if (method !== 'PUT') throw new Error(`Unexpected selection method ${method}`);
     const request = JSON.parse(new TextDecoder().decode(body as Uint8Array));
-    selectedProject = request.project;
     writes.push({ ...request, key: headers['Idempotency-Key'] });
+    if (beforeWrite) await beforeWrite(request.project);
+    selectedProject = request.project;
     return response(200, { data: workspaceSelection(request.project), receipt: {} });
+  };
+  if (route === 'hosted door') setRuntimeOrigin({ VITE_RUNTIME_ORIGIN: HOSTED_RUNTIME_ORIGIN });
+  const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input), window.location.origin);
+    if (url.pathname === WORKSPACE_CONFIG_ROUTE) {
+      return Response.json({
+        schemaVersion: 1, endpoint: 'http://127.0.0.1:17890', actorId: FAKE_RUNTIME_ACTOR_ID,
+        realmId: FAKE_RUNTIME_REALM_ID, runtimeInstanceId: FAKE_RUNTIME_INSTANCE_ID,
+      }, { headers: route === 'local proxy' ? { [LOCAL_WORKSPACE_ORIGIN_HEADER]: url.origin } : {} });
+    }
+    const runtimeOrigin = route === 'hosted door' ? HOSTED_RUNTIME_ORIGIN : window.location.origin;
+    if (url.origin !== runtimeOrigin || !url.pathname.startsWith('/api/runtime/')) {
+      throw new Error(`Unexpected request to ${url.href}`);
+    }
+    const path = url.pathname.slice('/api/runtime'.length) + url.search;
+    const headers = init?.headers as Record<string, string>;
+    const reply = await transport(init?.method ?? 'GET', path, headers, init?.body as RequestBody | undefined);
+    return new Response(new Uint8Array(reply.body), reply);
   });
-  return { writes, readSelection };
+  vi.stubGlobal('fetch', fetch);
+  return { writes, readSelection, currentProject: () => selectedProject };
 }
 
 function ProjectSwitch() {
@@ -104,9 +119,18 @@ async function settleSelection() {
   await act(async () => { await vi.advanceTimersByTimeAsync(500); });
 }
 
+function deferredWrite() {
+  let resolve!: () => void;
+  const promise = new Promise<void>(done => { resolve = done; });
+  return { promise, resolve };
+}
+
 describe('VideoEditorPage workspace project selection', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.useFakeTimers();
+    vi.resetModules();
+    ({ setRuntimeOrigin } = await import('@/integrations/runtime/connection.ts'));
+    ({ default: VideoEditorPage } = await import('./VideoEditorPage.tsx'));
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('Unexpected network request'); }));
   });
   afterEach(() => {
@@ -134,6 +158,9 @@ describe('VideoEditorPage workspace project selection', () => {
     ['a user fallback', response(200, { ...workspaceSelection('project-one'), scope: 'user' })],
     ['a malformed project', response(200, { ...workspaceSelection('project-one'), project: { project_id: 'project-one' } })],
     ['a malformed selection timestamp', response(200, { ...workspaceSelection('project-one'), updated_at: null })],
+    ['an unexpected selection field', response(200, { ...workspaceSelection('project-one'), additional: true })],
+    ['an unexpected project field', response(200, { ...workspaceSelection('project-one'), project: { ...workspaceSelection('project-one').project, additional: true } })],
+    ['an oversized project slug', response(200, { ...workspaceSelection('project-one'), project: { ...workspaceSelection('project-one').project, slug: 's'.repeat(129) } })],
     ['an unsupported read', response(405, { code: 'method_not_allowed' })],
   ])('writes the workspace selection after %s', async (_name, selection) => {
     const { writes, readSelection } = setupRuntime();
@@ -160,5 +187,49 @@ describe('VideoEditorPage workspace project selection', () => {
     }
     await act(async () => { finishRead(response(404, { code: 'not_found' })); });
     expect(writes.map(write => write.project)).toEqual(change === 'switching project' ? ['project-two'] : []);
+  });
+
+  it('preserves the later project selection when the earlier PUT is still pending', async () => {
+    const earlierWrite = deferredWrite();
+    const { writes, currentProject, readSelection } = setupRuntime('project-two', async project => {
+      if (project === 'project-one') await earlierWrite.promise;
+    });
+    openEditor();
+    await settleSelection();
+    expect(writes.map(write => write.project)).toEqual(['project-one']);
+    expect(currentProject()).toBe('project-two');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Switch project' }));
+    await settleSelection();
+    await act(async () => { earlierWrite.resolve(); });
+
+    expect(currentProject()).toBe('project-two');
+    expect(writes.map(write => write.project)).toEqual(['project-one', 'project-two']);
+    expect(readSelection).toHaveBeenCalledTimes(2);
+  });
+
+  it('drops the waiting project selection when the editor unmounts before the earlier PUT settles', async () => {
+    const earlierWrite = deferredWrite();
+    const { writes, readSelection } = setupRuntime('project-two', () => earlierWrite.promise);
+    const editor = openEditor();
+    await settleSelection();
+    expect(writes.map(write => write.project)).toEqual(['project-one']);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Switch project' }));
+    await settleSelection();
+    editor.unmount();
+    await act(async () => { earlierWrite.resolve(); });
+
+    expect(readSelection).toHaveBeenCalledOnce();
+    expect(writes.map(write => write.project)).toEqual(['project-one']);
+  });
+
+  it.each(['paired relay', 'hosted door'] as const)('uses only a workspace PUT on the %s', async (route) => {
+    const { writes, readSelection } = setupRuntime('project-one', undefined, route);
+    openEditor();
+    await settleSelection();
+
+    expect(readSelection).not.toHaveBeenCalled();
+    expect(writes).toEqual([{ project: 'project-one', scope: 'workspace', key: expect.any(String) }]);
   });
 });

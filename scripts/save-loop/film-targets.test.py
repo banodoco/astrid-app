@@ -12,7 +12,7 @@ spec.loader.exec_module(mod)
 
 class TargetProofTests(unittest.TestCase):
     def check(self, retime, expected_ambiguous=False):
-        return mod.prove_target(retime, ('occ', 'shot', 'visual'), {}, 'word',
+        return mod.prove_target(retime, ('occ', 'shot', 'visual'), {'app': {'astrid': {'on': '"word"'}}}, 'word',
                                 'doc', ('occ', 'shot', 'narration'), 'word-id', expected_ambiguous)
 
     def test_unique_requires_exact_source_and_word(self):
@@ -38,6 +38,13 @@ class TargetProofTests(unittest.TestCase):
                 self.check(retime, True)
         with patch.object(mod.moments, 'find_words', return_value=[['a'], ['b']]), patch.object(mod, 'require_retime_word_scope'):
             self.assertEqual(self.check(retime, True), 'ambiguous')
+
+    def test_missing_or_changed_declaration_is_rejected(self):
+        retime = SimpleNamespace(words=(['pool'], {}), bundle={})
+        for child in ({}, {'app': {'astrid': {'on': '"other"'}}}):
+            with self.assertRaisesRegex(RuntimeError, 'word declaration'):
+                mod.prove_target(retime, ('occ', 'shot', 'visual'), child, 'word',
+                                 'doc', ('occ', 'shot', 'narration'), 'word-id', True)
 
     def test_unique_resolution_errors_propagate(self):
         def fail(*args):

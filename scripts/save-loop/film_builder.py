@@ -32,7 +32,10 @@ def data(value):
 
 def prove_target(retime, selector, child, word, document_id, source, word_id, ambiguous):
     """Check ambiguity in the same authenticated word pool used by retiming."""
-    moment = moments.parse(f'"{word}"')
+    declaration = child.get('app', {}).get('astrid', {}).get('on')
+    if declaration != f'"{word}"':
+        raise RuntimeError('accepted word declaration differs from target')
+    moment = moments.parse(declaration)
     pool, captures = retime.words
     require_retime_word_scope(retime.bundle, captures, moment.line)
     hits = moments.find_words(moment, pool)
@@ -201,11 +204,11 @@ def build(cfg, client):
                     or original_asset['media_id'] == overlay_asset['media_id']):
                 raise RuntimeError('accepted overlay is not a distinct same-kind media swap')
             for asset in (original_asset, overlay_asset):
-                pin = next((p for p in pins[kind] if p['object_id'] == asset['media_id']), None)
-                if (not pin or asset.get('generationId') != pin['generation_id']
-                        or asset.get('variantId') != pin['variant_id']
-                        or asset.get('resolution') != f"{pin['metadata']['width']}x{pin['metadata']['height']}"
-                        or (kind == 'video' and asset.get('duration') != pin['metadata']['duration_seconds'])):
+                media_pin = next((p for p in pins[kind] if p['object_id'] == asset['media_id']), None)
+                if (not media_pin or asset.get('generationId') != media_pin['generation_id']
+                        or asset.get('variantId') != media_pin['variant_id']
+                        or asset.get('resolution') != f"{media_pin['metadata']['width']}x{media_pin['metadata']['height']}"
+                        or (kind == 'video' and asset.get('duration') != media_pin['metadata']['duration_seconds'])):
                     raise RuntimeError('accepted overlay media identity or metadata differs from import')
     last = saved['placements'][0 if shape.get('ripple') else -1]
     last_shot = saved['shots'][last['shot_id']]['internal_timeline']

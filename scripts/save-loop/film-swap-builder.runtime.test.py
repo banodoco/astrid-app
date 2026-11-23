@@ -34,6 +34,11 @@ with tempfile.TemporaryDirectory() as d:
  assert result['measurements']['shots'] == 2 and result['render_verified'] is False
  commits, _ = service._timeline_commits()
  closure = commits.revision_closure(project, 'test-film', result['accepted_head']['revision_id'])
+ saved = bundle_from_document(closure)
+ anchor = next(c for c in saved['parent']['clips'] if c['id'] == 'element-built-in')
+ transcript_pin = anchor['app']['astrid']['word_anchors']['on']['document']
+ assert result['transcript_pin'] == transcript_pin, (result['transcript_pin'], transcript_pin)
+ assert transcript_pin in closure['dependency_manifest']['documents']
  expected_output = {'resolution': '32x32', 'fps': 30, 'file': 'output.mp4'}
  assert closure['parent_revision']['payload']['config']['output'] == expected_output
  assert all(row['payload']['output'] == expected_output for row in closure['internal_timeline_revisions'])

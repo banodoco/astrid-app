@@ -36,7 +36,7 @@ import {
   RUNTIME_TARGETED_EXECUTION_CAPABILITY,
 } from './contract-metadata.ts';
 import { runtimeApiBase, runtimeOrigin } from './connection.ts';
-import { loadWorkspaceRuntimeConfig } from './workspaceRuntimeConfig.ts';
+import { loadWorkspaceRuntimeConfig, type WorkspaceRuntimeConfig } from './workspaceRuntimeConfig.ts';
 
 // A client without an explicit `baseUrl` asks `runtimeApiBase()` on every request: same-origin
 // `/api/runtime` locally (the connector/proxy injects the product credential), or the loopback
@@ -54,14 +54,15 @@ export const RUNTIME_CLIENT_SCOPES = [
   'tasks:write',
 ];
 const FORBIDDEN_RUNTIME_ACTORS = new Set(['owner', 'astrid-pack-host', 'admin', 'worker']);
-const workspaceProjectSelectionSchema = z.object({
+const workspaceResourceId = /^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$/;
+const workspaceProjectSelectionSchema = z.strictObject({
   actor_id: z.string().min(1),
   scope: z.literal('workspace'),
-  project: z.object({
-    project_id: z.string().min(1),
-    realm_id: z.string().min(1),
-    slug: z.string().min(1),
-    name: z.string().min(1),
+  project: z.strictObject({
+    project_id: z.string().regex(workspaceResourceId),
+    realm_id: z.string().regex(workspaceResourceId),
+    slug: z.string().min(1).max(128),
+    name: z.string().min(1).max(512),
     metadata: z.record(z.string(), z.unknown()),
     version: z.int().positive(),
     created_at: z.iso.datetime({ offset: true }),
@@ -98,18 +99,22 @@ export type ObservedRuntimeIdentities = Map<string, { actorId?: string; realmId:
 const RESTART_INSTANCE = 'Runtime restarted—relaunch workspace. The selected Runtime instance changed; your timeline draft is preserved.';
 const RESTART_REALM = 'Runtime realm changed—relaunch workspace. The connected Runtime belongs to a different realm; your timeline draft is preserved.';
 const observedRuntimeIdentities: ObservedRuntimeIdentities = new Map();
-let pageRuntimeIdentity: Promise<RuntimeIdentityBinding | undefined> | undefined;
+let pageRuntimeConfig: Promise<WorkspaceRuntimeConfig | undefined> | undefined;
 
-export function initializeWorkspaceRuntimeIdentity(): Promise<RuntimeIdentityBinding | undefined> {
-  if (!pageRuntimeIdentity) {
+function initializeWorkspaceRuntimeConfig(): Promise<WorkspaceRuntimeConfig | undefined> {
+  if (!pageRuntimeConfig) {
     const fetchImpl = globalThis.fetch;
     // The runtime config is served by the local preview proxy, so only same-origin builds read it. The hosted
     // build has no identity compiled in and binds to the first healthy session it sees through the gateway.
-    pageRuntimeIdentity = typeof fetchImpl === 'function' && runtimeOrigin() === ''
+    pageRuntimeConfig = typeof fetchImpl === 'function' && runtimeOrigin() === ''
       ? loadWorkspaceRuntimeConfig(configuredRuntimeIdentity(), fetchImpl.bind(globalThis))
       : Promise.resolve(configuredRuntimeIdentity());
   }
-  return pageRuntimeIdentity;
+  return pageRuntimeConfig;
+}
+
+export function initializeWorkspaceRuntimeIdentity(): Promise<RuntimeIdentityBinding | undefined> {
+  return initializeWorkspaceRuntimeConfig();
 }
 
 type RuntimeSession = { health: Health; handshake: Handshake; realm: Realm };
@@ -845,7 +850,10 @@ export class AstridRuntimeClient {
     return this.withSession(() => this.client.getProject(projectId));
   }
 
-  hasSelectedWorkspaceProject(projectId: string): Promise<boolean> {
+  async hasSelectedWorkspaceProject(projectId: string): Promise<boolean> {
+    if (runtimeOrigin() !== '' || !this.usesRuntimeConfig || this.readOnly) return false;
+    const config = await initializeWorkspaceRuntimeConfig();
+    if (!config?.localWorkspaceProxy) return false;
     return this.withSession(async ({ handshake }) => {
       const selection = workspaceProjectSelectionSchema.safeParse(await this.client.currentProject());
       return selection.success

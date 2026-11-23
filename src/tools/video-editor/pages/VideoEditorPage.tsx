@@ -378,10 +378,17 @@ export default function VideoEditorPage() {
   const tourSelection = useEditorTourSelection();
   const tourHeader = tourSelection ? tourHeaderProps() : null;
   const lastSelectedRuntimeProject = useRef<{ projectId: string } | null>(null);
+  const pendingRuntimeProjectSelection = useRef<Promise<void> | null>(null);
   useEffect(() => {
     if (!canSelectRuntimeProject || !projectId || tourSelection || lastSelectedRuntimeProject.current?.projectId === projectId) return;
     let active = true;
+    const needsSelection = () => active && timelineSelectionRef.current.projectId === projectId
+      && lastSelectedRuntimeProject.current?.projectId !== projectId;
     const updateSelection = async () => {
+      // A prior write can change the answer to the current-selection read.
+      const pending = pendingRuntimeProjectSelection.current;
+      if (pending) await pending;
+      if (!needsSelection()) return;
       const client = new AstridRuntimeClient();
       let alreadySelected = false;
       try {
@@ -389,16 +396,16 @@ export default function VideoEditorPage() {
       } catch {
         // Missing selections and older Runtime versions still use the selection mutation.
       }
-      if (!active || timelineSelectionRef.current.projectId !== projectId || lastSelectedRuntimeProject.current?.projectId === projectId) return;
+      if (!needsSelection()) return;
       const attempt = { projectId };
       lastSelectedRuntimeProject.current = attempt;
-      if (!alreadySelected) {
-        try {
-          await client.selectProject(projectId, "workspace");
-        } catch {
-          if (lastSelectedRuntimeProject.current === attempt) lastSelectedRuntimeProject.current = null;
-        }
-      }
+      if (alreadySelected) return;
+      const mutation = client.selectProject(projectId, "workspace").then(() => undefined, () => {
+        if (lastSelectedRuntimeProject.current === attempt) lastSelectedRuntimeProject.current = null;
+      });
+      pendingRuntimeProjectSelection.current = mutation;
+      await mutation;
+      if (pendingRuntimeProjectSelection.current === mutation) pendingRuntimeProjectSelection.current = null;
     };
     const timeout = window.setTimeout(() => {
       void updateSelection();

@@ -30,6 +30,7 @@ import { createAppBuildPlugin } from "./appBuild";
 import { createLocalUpdateStatusPlugin } from "./localUpdateStatus";
 import { createLocalUpdatePagePlugin } from "./localUpdatePage";
 import { createExtensionImportMapPlugin } from "./extensionImportMap";
+import { LOCAL_WORKSPACE_ORIGIN_HEADER } from "../../src/integrations/runtime/workspaceRuntimeConfig";
 
 const logger = createLogger();
 const originalWarn = logger.warn.bind(logger);
@@ -58,6 +59,8 @@ export default defineConfig(() => {
   const astridAcpBridgePort = resolveAstridAcpBridgePort(process.env.VITE_ASTRID_ACP_BRIDGE_PORT);
   const astridBridgeProxyPolicy = resolveAstridBridgeProxyPolicy(process.env);
   const pairedRelay = createPairedRelayPlugin(resolvePairedRelayConfig(process.env));
+  const localWorkspaceOrigin = `http://127.0.0.1:${port}`;
+  const localWorkspaceProxy = !pairedRelay && process.env.ASTRID_RUNTIME_OPERATION_ORIGIN === localWorkspaceOrigin;
   const astridSource = resolveAstridSource();
   if (!astridSource) {
     throw new Error('The Video Editor Tool build requires ASTRID_CHECKOUT or a bundled Astrid browser source.');
@@ -92,7 +95,17 @@ export default defineConfig(() => {
     ? {
       "/runtime-config/v1/operation": createRuntimeOperationProxyOptions(runtimeTarget),
       "/api/runtime": createWorkspaceRuntimeProxyOptions(runtimeTarget, runtimeToken),
-      "/runtime-config/v1/workspace.json": { target: runtimeTarget, changeOrigin: true },
+      "/runtime-config/v1/workspace.json": {
+        target: runtimeTarget,
+        changeOrigin: true,
+        configure(proxy) {
+          // The same compiled bundle can be served by the relay. Only the local launcher enables this read.
+          proxy.on('proxyRes', (response) => {
+            delete response.headers[LOCAL_WORKSPACE_ORIGIN_HEADER];
+            if (localWorkspaceProxy) response.headers[LOCAL_WORKSPACE_ORIGIN_HEADER] = localWorkspaceOrigin;
+          });
+        },
+      },
     }
     : {};
   const timelineSchemaPath = path.resolve(

@@ -1,9 +1,11 @@
 export const WORKSPACE_RUNTIME_CONFIG_PATH = '/runtime-config/v1/workspace.json';
+export const LOCAL_WORKSPACE_ORIGIN_HEADER = 'x-astrid-local-workspace-origin';
 
 export interface WorkspaceRuntimeConfig {
   actorId: string;
   realmId: string;
   runtimeInstanceId: string;
+  localWorkspaceProxy?: true;
 }
 
 /** The local preview proxy supplies this on every page load; other builds retain their baked binding. */
@@ -44,6 +46,7 @@ export async function loadWorkspaceRuntimeConfig(
       actorId: (value.actorId as string).trim(),
       realmId: (value.realmId as string).trim(),
       runtimeInstanceId: (value.runtimeInstanceId as string).trim(),
+      ...(response.headers.get(LOCAL_WORKSPACE_ORIGIN_HEADER) === url.origin ? { localWorkspaceProxy: true } : {}),
     };
   } catch {
     return fallback;

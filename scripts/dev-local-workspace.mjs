@@ -112,17 +112,18 @@ async function stopService(service, signal) {
   await service.done;
 }
 
-function runtimeCommand(action) {
+function runtimeCommand(action, operationId) {
   const { command, args, cwd } = resolveRuntimeCommand(runtimeSettings);
   return { command, cwd, args: [...args, action, '--profile', 'astrid', '--data-root', runtimeSettings.dataRoot,
     ...(runtimeSettings.sourceManifest ? ['--source-manifest', runtimeSettings.sourceManifest] : []),
     // The Runtime opens the hosted page's door itself; `off` starts it without one.
     ...(action === 'up' || action === 'restart' ? ['--hosted-origin', runtimeSettings.hostedOrigin ?? 'off'] : []),
+    ...(operationId ? ['--operation-id', operationId] : []),
     '--json'] };
 }
 
-async function runRuntimeCommand(action) {
-  const { command, args, cwd } = runtimeCommand(action);
+async function runRuntimeCommand(action, operationId) {
+  const { command, args, cwd } = runtimeCommand(action, operationId);
   const child = spawn(command, args, { cwd, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'], env: {
     ...process.env,
     ...(runtimeSettings.astridCheckout ? { ASTRID_CHECKOUT: runtimeSettings.astridCheckout } : {}),
@@ -141,10 +142,30 @@ async function runRuntimeCommand(action) {
   }
   catch (error) {
     let reported;
-    try { reported = JSON.parse(stdout).error; } catch { /* not a structured CLI error */ }
+    let response;
+    try { response = JSON.parse(stdout); reported = response.error; } catch { /* not a structured CLI error */ }
+    // This typed refusal is an observation handoff; all other failures retain
+    // their existing error path and cleanup/custody behavior.
+    if (action === 'up' && response?.code === 'startup_pending'
+      && typeof response.operation_id === 'string' && response.operation_id.length > 0) return response;
     throw new Error(`Runtime ${action} failed: ${reported || stderr.trim() || error.message}`);
   }
   finally { runtimeCliChild = null; }
+}
+
+async function observePendingRuntime(operationId) {
+  while (true) {
+    const observation = await runRuntimeCommand('startup-status', operationId);
+    if (!observation || observation.operation_id !== operationId || typeof observation.state !== 'string') {
+      throw new Error('Runtime startup observation was malformed or changed operation');
+    }
+    if (observation.state === 'pending') {
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
+      continue;
+    }
+    if (observation.state === 'ended') return;
+    throw new Error(`Runtime startup observation is ${observation.state}`);
+  }
 }
 
 function cleanup(signal = 'SIGTERM') {
@@ -608,6 +629,11 @@ if (verified === NOT_RUNNING && !checkOnly && !buildOnly) {
   let result;
   try {
     result = await runRuntimeCommand('up'); // CLI publishes discovery only after its owner passes readiness.
+    if (result.code === 'startup_pending') {
+      await observePendingRuntime(result.operation_id);
+      // An observed owner is never this launcher's cleanup responsibility.
+      result = { status: 'reconnected' };
+    }
   } catch (error) {
     // The Runtime names whatever already holds its door's port.
     const message = error instanceof Error ? error.message : String(error);

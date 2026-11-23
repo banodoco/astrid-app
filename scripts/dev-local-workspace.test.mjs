@@ -353,6 +353,9 @@ async function launchFixture(overrides = {}) {
     FAKE_RUNTIME_CATALOG_JSON: readFileSync(catalog, 'utf8'),
     FAKE_RUNTIME_DISCOVERY_PATH: discovery,
     FAKE_RUNTIME_APP_ENV: join(fixture, 'app-env.json'),
+    FAKE_RUNTIME_STATUS_COUNT: join(fixture, 'status-count'),
+    FAKE_RUNTIME_STATUS_PENDING_MARKER: join(fixture, 'status-pending'),
+    FAKE_RUNTIME_STATUS_RELEASE_FILE: join(fixture, 'status-release'),
     npm_execpath: join(noSpawnBin, 'npm-cli.js'),
   };
   writeFileSync(env.npm_execpath, `require('node:fs').writeFileSync(${JSON.stringify(spawnMarker)}, 'spawned');\n`);
@@ -367,6 +370,39 @@ fs.appendFileSync(log, JSON.stringify({ args, action, cwd: process.cwd(), astrid
 if (action === 'up' && process.env.FAKE_RUNTIME_UP_ERROR) {
   console.log(JSON.stringify({ ok: false, error: process.env.FAKE_RUNTIME_UP_ERROR }));
   process.exit(1);
+}
+if (action === 'up' && process.env.FAKE_RUNTIME_UP_PENDING === '1') {
+  console.log(JSON.stringify({ ok: false, code: 'startup_pending', operation_id: 'operation-r3', phase: 'connecting', state: 'pending', objects_checked: 0 }));
+  process.exit(1);
+}
+if (action === 'startup-status') {
+  const countPath = process.env.FAKE_RUNTIME_STATUS_COUNT;
+  const count = Number(fs.existsSync(countPath) ? fs.readFileSync(countPath, 'utf8') : '0') + 1;
+  fs.writeFileSync(countPath, String(count));
+  if (count === 1) {
+    fs.writeFileSync(process.env.FAKE_RUNTIME_STATUS_PENDING_MARKER, 'pending observed');
+    if (process.env.FAKE_RUNTIME_STATUS_FIRST === 'malformed') {
+      process.stdout.write('{not json');
+      process.exit(0);
+    }
+    const response = process.env.FAKE_RUNTIME_STATUS_FIRST
+      ? JSON.parse(process.env.FAKE_RUNTIME_STATUS_FIRST)
+      : { operation_id: 'operation-r3', phase: 'connecting', state: 'pending', objects_checked: 0 };
+    console.log(JSON.stringify(response));
+    process.exit(response.state === 'unavailable' ? 1 : 0);
+  }
+  const gate = process.env.FAKE_RUNTIME_STATUS_RELEASE_FILE;
+  const deadline = Date.now() + 10000;
+  while (!fs.existsSync(gate) && Date.now() < deadline) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+  if (!fs.existsSync(gate)) process.exit(1);
+  const dataRootIndex = args.indexOf('--data-root');
+  const dataRoot = dataRootIndex >= 0 ? args[dataRootIndex + 1] : null;
+  const target = path.join(dataRoot, 'runtime', 'discovery.json');
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(target, process.env.FAKE_RUNTIME_DISCOVERY_JSON + '\\n');
+  fs.writeFileSync(path.join(path.dirname(target), 'catalog.json'), process.env.FAKE_RUNTIME_CATALOG_JSON + '\\n');
+  console.log(JSON.stringify({ operation_id: 'operation-r3', phase: 'complete', state: 'ended', objects_checked: 1 }));
+  process.exit(0);
 }
 if (action === 'up' && process.env.FAKE_RUNTIME_UP_EXIT !== '1') {
   const dataRootIndex = args.indexOf('--data-root');
@@ -1136,6 +1172,62 @@ process.exit(result.status ?? 1);
   } finally {
     if (started) await started.stop();
     await fixture.close();
+  }
+});
+
+test('typed startup_pending is observed for the selected operation without App startup or Runtime custody', async () => {
+  const fixture = await launchFixture({ discoveryState: 'missing' });
+  const dataRoot = join(fixture.fixture, 'selected-data');
+  const runtimeCheckout = join(fixture.fixture, 'Runtime');
+  const sourceManifest = join(fixture.fixture, 'source-manifest.json');
+  mkdirSync(join(runtimeCheckout, '.venv', 'bin'), { recursive: true });
+  writeFileSync(join(runtimeCheckout, '.venv', 'bin', 'python'), `#!${process.execPath}\nconst { spawnSync } = require('node:child_process');\nconst result = spawnSync('astrid-runtime', process.argv.slice(4), { stdio: 'inherit', env: process.env });\nprocess.exit(result.status ?? 1);\n`, { mode: 0o700 });
+  writeFileSync(sourceManifest, '{}\n');
+  let started;
+  try {
+    started = await startLauncher({ fixture, args: ['--data-root', dataRoot, '--runtime', runtimeCheckout, '--source-manifest', sourceManifest],
+      env: { ASTRID_APP_LOOPBACK_ORIGIN: 'off', FAKE_RUNTIME_UP_PENDING: '1' },
+      until: () => existsSync(fixture.env.FAKE_RUNTIME_STATUS_PENDING_MARKER) });
+    assert.equal(readFileSync(started.spawnLog, 'utf8'), '', 'App services started while Runtime remained pending');
+    assert(!started.seen.stdout.includes('Open '), 'ready output appeared while Runtime remained pending');
+    assert.deepEqual(runtimeCliCalls(fixture).map(({ action }) => action), ['up', 'startup-status']);
+    assert.deepEqual(runtimeCliCalls(fixture)[1].args, ['startup-status', '--profile', 'astrid', '--data-root', dataRoot,
+      '--source-manifest', sourceManifest, '--operation-id', 'operation-r3', '--json']);
+    writeFileSync(fixture.env.FAKE_RUNTIME_STATUS_RELEASE_FILE, 'complete');
+    await new Promise((resolve) => {
+      const poll = () => readFileSync(started.spawnLog, 'utf8').includes('run dev') || started.child.exitCode !== null
+        ? resolve() : setTimeout(poll, 10);
+      poll();
+    });
+    assert.equal(started.child.exitCode, null, started.seen.stderr);
+    assert.deepEqual(runtimeCliCalls(fixture).map(({ action }) => action), ['up', 'startup-status', 'startup-status']);
+    assert.equal(readFileSync(fixture.env.FAKE_RUNTIME_STATUS_COUNT, 'utf8'), '2');
+    assert.deepEqual(fixture.requests.map(({ path }) => path), ['/v1/health', '/v1/handshake', '/v1/realm']);
+    assert(!started.seen.stdout.includes('Open '));
+    assert.match(readFileSync(started.spawnLog, 'utf8'), /run dev/);
+    await started.stop();
+    assert.deepEqual(runtimeCliCalls(fixture).map(({ action }) => action), ['up', 'startup-status', 'startup-status']);
+  } finally { if (started && started.child.exitCode === null) await started.stop(); await fixture.close(); }
+});
+
+test('mismatched, unavailable, malformed, or ended startup observations cannot start the App', async () => {
+  const cases = [
+    ['changed operation', JSON.stringify({ operation_id: 'other-operation', state: 'ended' })],
+    ['unavailable scope', JSON.stringify({ operation_id: 'operation-r3', state: 'unavailable' })],
+    ['malformed JSON', 'malformed'],
+    ['ended without published discovery', JSON.stringify({ operation_id: 'operation-r3', state: 'ended' })],
+  ];
+  for (const [label, observation] of cases) {
+    const fixture = await launchFixture({ discoveryState: 'missing' });
+    try {
+      const result = await launcherEnds({ fixture, env: {
+        ASTRID_APP_LOOPBACK_ORIGIN: 'off', FAKE_RUNTIME_UP_PENDING: '1', FAKE_RUNTIME_STATUS_FIRST: observation,
+      } });
+      assert.equal(result.code, 1, label);
+      assert.deepEqual(runtimeCliCalls(fixture).map(({ action }) => action), ['up', 'startup-status'], label);
+      assert.equal(result.spawned, '', `${label}: App child started`);
+      assert.equal(readFileSync(fixture.env.FAKE_RUNTIME_LIFECYCLE_LOG, 'utf8'), '', `${label}: Runtime shutdown was attempted`);
+    } finally { await fixture.close(); }
   }
 });
 

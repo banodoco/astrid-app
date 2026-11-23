@@ -2,11 +2,19 @@
   "schema_version": 1,
   "release": 15,
   "agent": {
-    "sha": "b324d7c1e94713e7ae48d3d98a70db1214ef658f"
+    "sha": "0615e4e99bc06c6b4d201447d8f9f99db3da2dba"
   },
   "runtime": {
     "sha": "737843e9cb92c565c266452dde540832ee2c745b",
     "schema_digest": "sha256:2c6a76e17b4441398ab91e3e9d6283a719fd5b08807447db9dbf2ecc5e1339a2"
+  },
+  "packs": {
+    "astrid_motion": {
+      "repo": "https://github.com/banodoco/poms_packs",
+      "commit": "2379ab54aca522019ff4f869cfdf9375bdb56dfc",
+      "digest_rule": "pack-tree-v1",
+      "digest": "75234c10217e67ec0f111a4cb6be4a6252e172a9cd382506498d07ce1d241029"
+    }
   },
   "tools": {
     "uv": {

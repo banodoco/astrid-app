@@ -103,9 +103,9 @@ function ProjectSwitch() {
   return <button onClick={() => setParams({ project: 'project-two', timeline: 'timeline-one' })}>Switch project</button>;
 }
 
-function openEditor() {
+function openEditor(projectId = 'project-one') {
   const view = render(
-    <MemoryRouter initialEntries={['/tools/video-editor?project=project-one&timeline=timeline-one']}
+    <MemoryRouter initialEntries={[`/tools/video-editor?project=${projectId}&timeline=timeline-one`]}
       future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <ProjectSwitch />
       <VideoEditorPage />
@@ -222,6 +222,28 @@ describe('VideoEditorPage workspace project selection', () => {
 
     expect(readSelection).toHaveBeenCalledOnce();
     expect(writes.map(write => write.project)).toEqual(['project-one']);
+  });
+
+  it('preserves the reopened project selection when the unmounted editor still has a pending PUT', async () => {
+    const earlierWrite = deferredWrite();
+    const { writes, currentProject, readSelection } = setupRuntime('project-two', async project => {
+      if (project === 'project-one') await earlierWrite.promise;
+    });
+    const first = openEditor();
+    await settleSelection();
+    expect(writes.map(write => write.project)).toEqual(['project-one']);
+    expect(currentProject()).toBe('project-two');
+    first.unmount();
+
+    openEditor('project-two');
+    await settleSelection();
+    const readsWhilePending = readSelection.mock.calls.length;
+    await act(async () => { earlierWrite.resolve(); });
+
+    expect(currentProject()).toBe('project-two');
+    expect(readsWhilePending).toBe(1);
+    expect(readSelection).toHaveBeenCalledTimes(2);
+    expect(writes.map(write => write.project)).toEqual(['project-one', 'project-two']);
   });
 
   it.each(['paired relay', 'hosted door'] as const)('uses only a workspace PUT on the %s', async (route) => {

@@ -7,7 +7,10 @@ import hashlib
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from collections.abc import Mapping
 
 from astrid.sdk import AstridClient
@@ -77,7 +80,13 @@ def build(cfg, client):
     targets_words = [words[2], words[3], words[0], words[1]]
     content = build_transcript(pins['audio'][0]['object_id'], 'film-line', 'repeat repeat w0001 w0002', words)
     document_id = transcript_document_id(project, content['media_id'], content['source_id'])
-    spec = {'projectId': project, 'timelineId': timeline, 'shape': shape, 'selections': pins['video'],
+    pack_path = cfg.get('collection_pack_path')
+    if pack_path:
+        from film_packs import collection_reference
+        collection_element = collection_reference(pack_path)
+    else:
+        collection_element = None
+    spec = {'collectionElement': collection_element, 'projectId': project, 'timelineId': timeline, 'shape': shape, 'selections': pins['video'],
             'legacyWord': {'documentId': document_id, 'text': 'w0001', 'at': 0.1, 'content': content},
             'mediaSize': {'width': pins['video'][0]['metadata']['width'], 'height': pins['video'][0]['metadata']['height']},
             'narration': {'selection': pins['audio'][0], 'image': pins['image'][0],
@@ -100,7 +109,8 @@ def build(cfg, client):
     pin = {'document_id': document_id, 'version': transcript['version'], 'content_digest': _digest(content)}
     capture = read_verified_transcript(transport, project, pin)
     bundle.setdefault('source_mapping', {})['pinned_documents'] = [capture]
-    choice = {'source': f'occurrence:{timeline}-occ-0/clip:narration', 'document': pin,
+    narration_index = 1 if shape.get('ripple') else 0
+    choice = {'source': f'occurrence:{timeline}-occ-{narration_index}/clip:narration', 'document': pin,
               'word_ids': [content['segments'][0]['words'][2]['id']]}
     anchor = capture_anchor(bundle, 'parent/clip:element-built-in', 'on', '"w0001"', choice)
     anchor['intent'] = {'anchor': 'follow'}
@@ -115,17 +125,40 @@ def build(cfg, client):
     closure = reopened['canonical_document']
     if reopened['head']['revision_id'] != revision or pin not in closure['dependency_manifest']['documents']:
         raise RuntimeError('accepted head did not retain the transcript pin')
+    packs = None
+    if collection_element:
+        from film_packs import place_project
+        realm = client.documents._identity()['realm_id']
+        revision, project_pack = place_project(client, realm, project, timeline, revision)
+        reopened = data(transport.get_project_timeline_verified_head(project, timeline))
+        closure = reopened['canonical_document']
+        if reopened['head']['revision_id'] != revision or pin not in closure['dependency_manifest']['documents']:
+            raise RuntimeError('pack placement head or transcript pin mismatch')
+        document_pins = closure['dependency_manifest']['documents']
+        if not any(row.get('document_id') == project_pack['document_id'] and
+                   row.get('version') == project_pack['document_version'] and row.get('content_digest')
+                   for row in document_pins):
+            raise RuntimeError('project pack admission pin missing from accepted manifest')
+        packs = {'project': project_pack, 'collection': {'element': collection_element}}
     saved = bundle_from_document(closure)
+    if packs:
+        rows = {row['id']: row for row in saved['parent']['clips']}
+        for label in ('project', 'collection'):
+            row = rows[f'element-{label}-pack']
+            if row.get('elementRef') != packs[label]['element']:
+                raise RuntimeError(f'{label} element reference was not retained')
     parent_clip = next(row for row in saved['parent']['clips'] if row['id'] == 'element-built-in')
     if parent_clip['app']['astrid']['word_anchors']['on']['document'] != pin:
         raise RuntimeError('accepted parent anchor did not retain the transcript pin')
     saved.setdefault('source_mapping', {})['pinned_documents'] = [capture]
     retime = ShotWordRetimeInputs(saved)
-    shot = saved['shots'][f'{timeline}-shot-0000']['internal_timeline']
+    shot = saved['shots'][f'{timeline}-shot-{narration_index:04d}']['internal_timeline']
     targets = []
     for i, word in enumerate(targets_words):
-        child = next(row for row in shot['clips'] if row['id'] == f'footage-0-{i}')
-        selector = (f'{timeline}-occ-0', f'{timeline}-shot-0000', child['id'])
+        target_index = 0 if shape.get('ripple') and i >= 2 else narration_index
+        target_shot = saved['shots'][f'{timeline}-shot-{target_index:04d}']['internal_timeline']
+        child = next(row for row in target_shot['clips'] if row['id'] == f'footage-{target_index}-{i}')
+        selector = (f'{timeline}-occ-{target_index}', f'{timeline}-shot-{target_index:04d}', child['id'])
         try:
             binding, _, _ = retime.resolve(selector, child, 'on', f'"{word[2]}"')
         except (TimingCompileError, ValueError):
@@ -142,22 +175,22 @@ def build(cfg, client):
     if 'clip_target' in cfg and child_count + parent_count != cfg['clip_target']:
         raise RuntimeError('accepted fixture clip count differs from requested count')
     for i in range(2):
-        original = next(row for row in shot['clips'] if row['id'] == f'footage-0-{i}')
+        original = next(row for row in shot['clips'] if row['id'] == f'footage-{narration_index}-{i}')
         overlay = next(row for row in saved['parent']['clips'] if row['id'] == f'overlay-{i}')
-        if overlay['at'] != original['at'] or overlay['hold'] != original['hold']:
+        if overlay['at'] != shape['shots'][narration_index]['on'] + original['at'] or overlay['hold'] != original['hold']:
             raise RuntimeError('accepted overlay does not cover its original')
-    last = saved['placements'][-1]
+    last = saved['placements'][0 if shape.get('ripple') else -1]
     last_shot = saved['shots'][last['shot_id']]['internal_timeline']
     if not any(row['at'] + row['hold'] > last['duration_ms'] / 1000 for row in last_shot['clips']):
         raise RuntimeError('accepted fixture lacks the historical overrun')
     return {'project_id': project, 'timeline_id': timeline, 'accepted_head': reopened['head'],
             'import_receipt_id': imported['receipt']['receipt_id'], 'anchor_receipt_id': result['receipt']['receipt_id'],
             'media': imports, 'transcript_pin': pin, 'targets': targets,
-            'ripple_cut': {'start_seconds': 0.2, 'end_seconds': 0.7,
-                           'later_narration_selector': f'occurrence:{timeline}-occ-0/clip:narration-later'},
+            'ripple_cut': {'start_seconds': shape['shots'][narration_index]['on'] + 0.2, 'end_seconds': shape['shots'][narration_index]['on'] + 0.7,
+                           'later_narration_selector': f'occurrence:{timeline}-occ-{narration_index}/clip:narration-later'},
             'measurements': {'shots': len(saved['placements']), 'child_clips': child_count,
                              'parent_clips': parent_count, 'duration_seconds': shape['durationSeconds']},
-            'packs': 'pending: fixture pack elements are not admitted', 'render_verified': False}
+            'packs': packs or 'pending: fixture pack elements are not admitted', 'render_verified': False}
 
 
 def main():

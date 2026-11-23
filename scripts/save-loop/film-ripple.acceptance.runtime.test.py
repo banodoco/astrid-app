@@ -1,8 +1,7 @@
 """Exercise ripple and dry reflow without hiding a separate last-shot overrun.
 
-The imported final occurrence deliberately ends 100 ms before its last picture.
-Reflow corrects that occurrence's duration; this is asserted separately from
-preservation of every clip's start and end, so it cannot mask clip movement.
+The first occurrence deliberately ends before its last picture. Reflow must
+preserve that overrun and every clip span, without changing occurrence durations.
 """
 import copy, importlib.util, json, subprocess, tempfile
 from pathlib import Path
@@ -31,31 +30,9 @@ with tempfile.TemporaryDirectory() as d:
   def get_document(self,*a): return service.get_document(*a)
   def get_project_verified_document(self,p,pin): return service.get_project_verified_document(p,pin,authorize=lambda:None)
   def commit_timeline(self,p,t,b,**kw): return service.commit_timeline(p,t,b,publisher='author',invocation_path=route_path(p,t),authorize=lambda:None,**kw)
- shape=json.loads(subprocess.check_output(['node','--input-type=module','-e',f"import {{filmShape}} from '{(base/'film-shape.mjs').as_uri()}';let s=filmShape({{clipCount:621}});s.elements=s.elements.slice(0,1);s.shots[0].duration=4.2;s.shots[0].children.at(-1).hold-=1/30;s.shots.slice(1).forEach(x=>x.on-=1/30);s.shots[0].children.splice(11,1);s.overlays.forEach(o=>o.shotIndex=1);console.log(JSON.stringify(s));"],text=True))
- # Adapt the importer only for this fixture: the first occurrence retains
- # repeat playback and the historical overrun; the next contains the cut.
- source = (base/'film-import.mjs').read_text()
- source = source.replace('shot.index === 0', 'shot.index === 1')
- source = source.replace('shot.index !== shape.shots.length - 1', 'shot.index !== 0')
- source = source.replace('const legacy = occurrences.at(-1);', 'const legacy = occurrences[0];')
- source = source.replace('row.app = {astrid: {on: `"${narration.words[child.index].text}"`, for: row.hold}};', 'if (child.index < 2) row.app = {astrid: {on: `"${narration.words[child.index].text}"`, for: row.hold}};')
- source = source.replace('      original.set(`${shot.index}:${child.index}`, row);', '      if (shot.index === 1 && child.index >= 2 && row.at < 0.7) row.at = 0.7;\n      if (shot.index === 0 && (child.index === 2 || child.index === 3)) { row.at = child.index === 2 ? 0.01 : 0.05; row.hold = row.to = 0.1; row.app = {astrid: {on: `"repeat"`, for: row.hold}}; }\n      original.set(`${shot.index}:${child.index}`, row);')
- source = source.replace('    const internalDigest = revisionDigest(payload);', "    if (narration && shot.index === 0) { const pin = narration.selection; payload.tracks.push({id:'LA1', kind:'audio', label:'LA1'}); payload.registry.assets[pin.asset] = binding(pin, 'audio'); payload.clips.push({id:'repeat-narration', clipType:'audio', track:'LA1', asset:pin.asset, at:0, hold:0.08, from:0, to:0.08, speed:1}); used.add(pin.object_id); }\n    const internalDigest = revisionDigest(payload);")
- fixture_import = root/'film-import.mjs'
- fixture_import.write_text(source)
- # Keep the builder's acceptance checks, pointed at the fixture's occurrences.
- builder = (base/'film_builder.py').read_text()
- builder = builder.replace("occ-0/clip:narration", "occ-1/clip:narration")
- builder = builder.replace("shot-0000", "shot-0001").replace("footage-0-{i}", "footage-1-{i}").replace("occ-0', f'", "occ-1', f'")
- builder = builder.replace("if i >= 2 or binding.document_id != document_id:", "if binding.document_id != document_id:")
- builder = builder.replace("if overlay['at'] != original['at']", "if overlay['at'] != shape['shots'][1]['on'] + original['at']")
- builder = builder.replace("last = saved['placements'][-1]", "last = saved['placements'][0]")
- # Target lookup uses the retained repeat declarations in the first shot.
- builder = builder.replace("child = next(row for row in shot['clips'] if row['id'] == f'footage-1-{i}')", "target_shot = shot if i < 2 else saved['shots'][f'{timeline}-shot-0000']['internal_timeline']\n        child = next(row for row in target_shot['clips'] if row['id'] == f'footage-{1 if i < 2 else 0}-{i}')")
- builder = builder.replace("selector = (f'{timeline}-occ-1', f'{timeline}-shot-0001', child['id'])", "selector = (f'{timeline}-occ-{1 if i < 2 else 0}', f'{timeline}-shot-{1 if i < 2 else 0:04d}', child['id'])")
- builder_path = root/'film_builder.py'; builder_path.write_text(builder)
- spec=importlib.util.spec_from_file_location('film_builder',builder_path); mod=importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
- cfg={'project_id':project,'timeline_id':'test-film','clip_target':621,'shape':shape,'node':'node','film_import_module':fixture_import.as_uri(),'media':{'image':[str(root/'i.png')],'video':[str(root/'v.mp4')],'audio':[str(root/'a.wav')]}}
+ shape=json.loads(subprocess.check_output(['node','--input-type=module','-e',f"import {{filmShape}} from '{(base/'film-shape.mjs').as_uri()}';let s=filmShape({{clipCount:621,ripple:true}});s.elements=s.elements.slice(0,1);console.log(JSON.stringify(s));"],text=True))
+ spec=importlib.util.spec_from_file_location('film_builder',base/'film_builder.py'); mod=importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+ cfg={'project_id':project,'timeline_id':'test-film','clip_target':621,'shape':shape,'node':'node','film_import_module':(base/'film-import.mjs').as_uri(),'media':{'image':[str(root/'i.png')],'video':[str(root/'v.mp4')],'audio':[str(root/'a.wav')]}}
  result=mod.build(cfg,SimpleNamespace(_remote=SimpleNamespace(_transport=T())))
  assert result['accepted_head']['revision_id'] and result['accepted_head']['publication_id']
  assert [row['status'] for row in result['targets']] == ['resolved','resolved','ambiguous','ambiguous']
@@ -103,15 +80,6 @@ with tempfile.TemporaryDirectory() as d:
  ambiguous_clips['footage-0-2']['at'] += 0.5
  ambiguous_clips['repeat-narration']['at'] += 0.5
  refused_without_mutation(ambiguous, negative_baseline)
- checkout = Checkout(copy.deepcopy(baseline))
- checkout._scene_client = T()
- checkout._scene_project = project
- assert abs(checkout.ripple_delete(4.4, 4.9) - 0.5) < 1e-6
- candidate = checkout.bundle
- after = {c['id']: c for c in candidate['shots']['test-film-shot-0001']['internal_timeline']['clips']}
- for cid in ('narration-later', 'footage-1-1'):
-  assert abs(after[cid]['at'] - (by_id[cid]['at'] - 0.5)) < 1e-6, (cid, by_id[cid], after[cid], candidate['placements'][1])
- validate_final_candidate(candidate, baseline=baseline)
  def clip_spans(bundle):
   spans = {('parent', clip['id']): (clip['at'], clip['at'] + clip['hold'])
            for clip in bundle['parent']['clips']}
@@ -123,6 +91,29 @@ with tempfile.TemporaryDirectory() as d:
     assert key not in spans
     spans[key] = (offset + clip['at'], offset + clip['at'] + clip['hold'])
   return spans
+ baseline_spans = clip_spans(baseline)
+ assert len(baseline_spans) == 621
+ checkout = Checkout(copy.deepcopy(baseline))
+ checkout._scene_client = T()
+ checkout._scene_project = project
+ assert abs(checkout.ripple_delete(4.4, 4.9) - 0.5) < 1e-6
+ candidate = checkout.bundle
+ ripple_spans = clip_spans(candidate)
+ assert ripple_spans.keys() == baseline_spans.keys()
+ intersecting = []
+ for key, (start, end) in baseline_spans.items():
+  new_start, new_end = ripple_spans[key]
+  if start >= 4.9 - 1e-6:
+   assert abs(new_start - (start - 0.5)) < 1e-6 and abs(new_end - (end - 0.5)) < 1e-6, (key, (start, end), ripple_spans[key])
+  elif end <= 4.4 + 1e-6:
+   assert abs(new_start - start) < 1e-6 and abs(new_end - end) < 1e-6, (key, (start, end), ripple_spans[key])
+  else:
+   intersecting.append(key)
+ assert intersecting == [('parent', 'element-built-in')], intersecting
+ after = {c['id']: c for c in candidate['shots']['test-film-shot-0001']['internal_timeline']['clips']}
+ for cid in ('narration-later', 'footage-1-1'):
+  assert abs(after[cid]['at'] - (by_id[cid]['at'] - 0.5)) < 1e-6, (cid, by_id[cid], after[cid], candidate['placements'][1])
+ validate_final_candidate(candidate, baseline=baseline)
  before_reflow = copy.deepcopy(candidate)
  before_spans = clip_spans(before_reflow)
  assert len(before_spans) == 621
@@ -133,9 +124,26 @@ with tempfile.TemporaryDirectory() as d:
  after_overrun = after_reflow['placements'][0]
  assert before_overrun['occurrence_id'] == after_overrun['occurrence_id'] == 'test-film-occ-0'
  assert before_overrun['placement']['start_ms'] == after_overrun['placement']['start_ms'] == 0
- assert after_overrun['duration_ms'] - before_overrun['duration_ms'] == 100
- expected = copy.deepcopy(before_reflow)
- expected['placements'][0]['duration_ms'] = after_overrun['duration_ms']
- assert after_reflow == expected
+ assert before_overrun['duration_ms'] == after_overrun['duration_ms'] == 4100
+ def overrun(bundle):
+  placement = bundle['placements'][0]
+  shot = bundle['shots'][placement['shot_id']]['internal_timeline']
+  return max(c['at'] + c['hold'] for c in shot['clips']) > placement['duration_ms'] / 1000
+ assert overrun(before_reflow) and overrun(after_reflow)
+ duration_changes = [(before['occurrence_id'], before['duration_ms'], after['duration_ms'])
+                     for before, after in zip(before_reflow['placements'], after_reflow['placements'])
+                     if before['duration_ms'] != after['duration_ms']]
+ assert duration_changes == []
+ def differences(a, b, path=''):
+  if isinstance(a, dict) and isinstance(b, dict):
+   for key in a.keys() | b.keys():
+    if key not in a or key not in b: print('DIFF', path, key, 'missing')
+    else: differences(a[key], b[key], f'{path}/{key}')
+  elif isinstance(a, list) and isinstance(b, list):
+   if len(a) != len(b): print('DIFF', path, 'length', len(a), len(b))
+   for i, (x, y) in enumerate(zip(a, b)): differences(x, y, f'{path}/{i}')
+  elif a != b: print('DIFF', path, repr(a), repr(b))
+ differences(before_reflow, after_reflow)
+ assert after_reflow == before_reflow
  print('reflow messages:', messages, 'overrun durations:', before_overrun['duration_ms'], after_overrun['duration_ms'])
  print('film builder accepted in disposable embedded Runtime; ripple and reflow proved')

@@ -659,9 +659,10 @@ async function buildFilm({resolvedRoot, ports}) {
   const projectId = findString(reply, 'project_id') || findString(reply, 'id');
   if (!projectId) throw new Error('Runtime omitted created project id');
   const timelineId = `film-shaped-${nonce}`;
-  // Account for the split narration, while the two pack elements remain pending.
-  const shape = filmShape({clipCount: clipTarget, shotCount: Math.min(46, Math.floor((clipTarget - 4) / 8))});
-  shape.elements = shape.elements.filter(row => row.kind === 'built-in');
+  // The split narration adds two clips to the shape's count.
+  const shape = filmShape({ripple: true, clipCount: clipTarget - 2, shotCount: Math.min(46, Math.floor((clipTarget - 4) / 8))});
+  const collectionPackPath = process.env.SAVE_LOOP_COLLECTION_PACK;
+  if (!collectionPackPath) throw new Error('SAVE_LOOP_COLLECTION_PACK must name the installed astrid_motion fixture pack');
   const versionsDir = path.resolve(resolvedRoot, 'program/versions');
   const versions = fs.readdirSync(versionsDir).filter(name => name !== 'current'
     && fs.existsSync(path.join(versionsDir, name, 'py/bin/python')));
@@ -674,7 +675,7 @@ async function buildFilm({resolvedRoot, ports}) {
   for (const directory of [stackTmp, xdgData, xdgConfig]) fs.mkdirSync(directory, {recursive: true});
   const configPath = path.join(scratch, `film-config-${nonce}.json`);
   const measurementPath = path.join(scratch, `film-measurement-${nonce}.json`);
-  fs.writeFileSync(configPath, JSON.stringify({project_id: projectId, timeline_id: timelineId, clip_target: clipTarget, media, shape,
+  fs.writeFileSync(configPath, JSON.stringify({project_id: projectId, timeline_id: timelineId, clip_target: clipTarget, media, shape, collection_pack_path: collectionPackPath,
     node: process.execPath, film_import_module: new URL('./film-import.mjs', import.meta.url).href,
     outbox_root: path.join(scratch, `film-outbox-${nonce}`)}));
   try {
@@ -693,7 +694,7 @@ async function buildFilm({resolvedRoot, ports}) {
     throw new Error('public Runtime head does not match accepted film fixture head');
   const manifest = {schema_version: 1, variant, project_id: projectId, timeline_id: timelineId,
     ...measurement, media_size: mediaSize, generated_media_bytes: bytes,
-    pending: ['collection-pack admission', 'project-pack admission', 'render proof']};
+    pending: ['render proof']};
   const manifestPath = path.join(scratch, `manifest-${projectId}.json`);
   fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
   console.log(`Manifest: ${manifestPath}`);

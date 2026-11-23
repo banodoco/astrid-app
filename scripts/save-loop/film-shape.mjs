@@ -1,4 +1,21 @@
 // Pure configuration and geometry for the generated film-shaped fixture.
+import fs from 'node:fs';
+
+const MIB = 1024 ** 2;
+const IMPORT_LIMIT = 64 * MIB;
+const IMPORT_MARGIN = 4 * MIB;
+
+export function checkFilmMediaSizes(files) {
+  for (const file of files) {
+    if (fs.statSync(file).size > IMPORT_LIMIT - IMPORT_MARGIN)
+      throw new Error(`generated media ${file} exceeds the 64 MiB Runtime import limit with a 4 MiB margin`);
+  }
+}
+
+export function filmMediaDurations(shape) {
+  return {audioDuration: Math.max(90, Math.ceil(shape.shots[1].duration)),
+    videoDuration: Math.max(90, Math.ceil(Math.max(...shape.shots.flatMap(shot => shot.children.map(child => child.hold)))))};
+}
 export function parseFixtureOptions(args = [], env = {}) {
   const options = {};
   let prepareMedia = false;
@@ -29,16 +46,18 @@ export function parseFixtureOptions(args = [], env = {}) {
   return {variant, clipCount: count, mediaSize: {width, height}, ...(prepareMedia ? {prepareMedia} : {})};
 }
 
-// Use the same generated sources and encoding as the standard large-shots
-// fixture. The source is longer than any single shot in filmShape.
+// Generated sources are long enough for every shot, with a bounded video rate.
 export function filmMediaCommands({width, height}, video, audio, image, video2, image2, audioDuration = 90, videoDuration = 90) {
+  // Reserve 12 MiB below the precheck for VBV bursts and container overhead.
+  const bitrate = Math.floor(48 * MIB * 8 / videoDuration);
+  const rate = ['-b:v', String(bitrate), '-maxrate', String(bitrate), '-bufsize', String(bitrate)];
   return [
     ['-f', 'lavfi', '-i', `testsrc2=s=${width}x${height}:r=15:d=${videoDuration}`, '-c:v', 'libx264',
-      '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-y', video],
+      '-preset', 'ultrafast', ...rate, '-pix_fmt', 'yuv420p', '-y', video],
     ['-f', 'lavfi', '-i', `sine=frequency=317:sample_rate=44100:duration=${audioDuration}`, '-y', audio],
     ['-f', 'lavfi', '-i', `testsrc2=s=${width}x${height}:r=1`, '-frames:v', '1',
       '-threads', '1', '-y', image],
-    ...(video2 ? [['-f', 'lavfi', '-i', `color=c=blue:s=${width}x${height}:r=15:d=${videoDuration}`, '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-y', video2]] : []),
+    ...(video2 ? [['-f', 'lavfi', '-i', `color=c=blue:s=${width}x${height}:r=15:d=${videoDuration}`, '-c:v', 'libx264', '-preset', 'ultrafast', ...rate, '-pix_fmt', 'yuv420p', '-y', video2]] : []),
     ...(image2 ? [['-f', 'lavfi', '-i', `color=c=blue:s=${width}x${height}:r=1`, '-frames:v', '1', '-threads', '1', '-y', image2]] : []),
   ];
 }

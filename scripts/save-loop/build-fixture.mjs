@@ -25,7 +25,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.resolve(here, '../..');
 const root = process.env.SAVE_LOOP_ROOT;
 const baseUrl = process.env.SAVE_LOOP_BASE_URL;
-const {variant, clipCount: clipTarget, mediaSize, prepareMedia} = parseFixtureOptions(process.argv.slice(2), process.env);
+const {variant, clipCount: clipTarget, mediaSize, prepareMedia, omitAmbiguousAnchors} = parseFixtureOptions(process.argv.slice(2), process.env);
 const largeShots = variant === 'large-shots';
 const startedAt = Date.now();
 const scratch = path.resolve(process.env.SAVE_LOOP_SCRATCH || `${repo}.env/save-loop`);
@@ -675,7 +675,7 @@ async function buildFilm({resolvedRoot, ports, shape}) {
   for (const directory of [stackTmp, xdgData, xdgConfig]) fs.mkdirSync(directory, {recursive: true});
   const configPath = path.join(scratch, `film-config-${nonce}.json`);
   const measurementPath = path.join(scratch, `film-measurement-${nonce}.json`);
-  fs.writeFileSync(configPath, JSON.stringify({project_id: projectId, timeline_id: timelineId, clip_target: clipTarget, media, shape, collection_pack_path: collectionPackPath,
+  fs.writeFileSync(configPath, JSON.stringify({project_id: projectId, timeline_id: timelineId, clip_target: clipTarget, media, shape, collection_pack_path: collectionPackPath, omit_ambiguous_anchors: !!omitAmbiguousAnchors,
     node: process.execPath, film_import_module: new URL('./film-import.mjs', import.meta.url).href,
     outbox_root: path.join(scratch, `film-outbox-${nonce}`)}));
   try {

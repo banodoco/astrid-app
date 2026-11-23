@@ -53,6 +53,12 @@ isolated SL-1 stack. Set `SAVE_LOOP_ROOT` to the stack root and
 node scripts/save-loop/build-fixture.mjs --variant film-shaped
 ```
 
+By default the fixture includes two deliberately ambiguous `"repeat"` word
+declarations for refusal checks. Add `--omit-ambiguous-anchors` to omit those
+declarations while retaining their footage clips and the repeated transcript
+words. The measurement reports the two unique resolved targets and the number
+of intentionally omitted declarations.
+
 The resulting manifest records the accepted Runtime head and generated media. The
 fixture imports two distinct images and two distinct videos for same-kind overlay
 swaps, and verifies their accepted identities and metadata.

@@ -19,8 +19,14 @@ export function filmMediaDurations(shape) {
 export function parseFixtureOptions(args = [], env = {}) {
   const options = {};
   let prepareMedia = false;
+  let omitAmbiguousAnchors = false;
   for (let i = 0; i < args.length; i++) {
     const name = args[i];
+    if (name === '--omit-ambiguous-anchors') {
+      if (omitAmbiguousAnchors) throw new Error('duplicate option: --omit-ambiguous-anchors');
+      omitAmbiguousAnchors = true;
+      continue;
+    }
     if (name === '--prepare-media') {
       if (prepareMedia) throw new Error('duplicate option: --prepare-media');
       prepareMedia = true;
@@ -34,6 +40,7 @@ export function parseFixtureOptions(args = [], env = {}) {
   const variant = options['--variant'] ?? env.SAVE_LOOP_VARIANT ?? 'standard';
   if (!['standard', 'large-shots', 'film-shaped'].includes(variant)) throw new Error(`invalid variant: ${variant}`);
   if (prepareMedia && variant !== 'film-shaped') throw new Error('--prepare-media requires --variant film-shaped');
+  if (omitAmbiguousAnchors && variant !== 'film-shaped') throw new Error('--omit-ambiguous-anchors requires --variant film-shaped');
   const count = Number(options['--clips'] ?? env.SAVE_LOOP_CLIPS ?? (variant === 'film-shaped' ? 621 : 616));
   const minimum = variant === 'film-shaped' ? 23 : 616;
   if (!Number.isSafeInteger(count) || count < minimum)
@@ -43,7 +50,8 @@ export function parseFixtureOptions(args = [], env = {}) {
   const width = Number(match?.[1]), height = Number(match?.[2]);
   if (!match || width < 2 || height < 2 || width > 7680 || height > 4320 || width % 2 || height % 2)
     throw new Error(`invalid media size: ${size}`);
-  return {variant, clipCount: count, mediaSize: {width, height}, ...(prepareMedia ? {prepareMedia} : {})};
+  return {variant, clipCount: count, mediaSize: {width, height}, ...(prepareMedia ? {prepareMedia} : {}),
+    ...(omitAmbiguousAnchors ? {omitAmbiguousAnchors} : {})};
 }
 
 // Generated sources are long enough for every shot, with a bounded video rate.

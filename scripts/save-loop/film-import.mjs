@@ -22,7 +22,7 @@ export function revisionDigest(value) {
 // selections are actual Runtime media selections for generated video objects.
 // Every selection needs asset, object_id, generation_id and variant_id. The
 // caller must ensure sources are long enough for every requested hold.
-export function prepareFilmFootage({timelineId, shape, selections, legacyWord, narration, mediaSize = {width: 1280, height: 720}}) {
+export function prepareFilmFootage({timelineId, shape, selections, legacyWord, narration, omitAmbiguousAnchors = false, mediaSize = {width: 1280, height: 720}}) {
   if (!Number.isSafeInteger(mediaSize?.width) || !Number.isSafeInteger(mediaSize?.height) ||
       mediaSize.width < 2 || mediaSize.height < 2 || mediaSize.width % 2 || mediaSize.height % 2)
     throw new Error('invalid film output dimensions');
@@ -77,7 +77,7 @@ export function prepareFilmFootage({timelineId, shape, selections, legacyWord, n
       if (narration && shot.index === narrationShot && child.index < 4) {
         row.at = narration.words[child.index].at;
         if (narration.splitAt) row.hold = row.to = 0.1;
-        if (!shape.ripple || child.index < 2) row.app = {astrid: {on: `"${narration.words[child.index].text}"`, for: row.hold}};
+        if ((!shape.ripple || child.index < 2) && (!omitAmbiguousAnchors || child.index < 2)) row.app = {astrid: {on: `"${narration.words[child.index].text}"`, for: row.hold}};
       }
       if (legacyWord && !narration && shot.index === narrationShot && child.index === 1) {
         if (legacyWord.at + child.hold > shot.duration) throw new Error('legacy word clip exceeds its shot');
@@ -87,7 +87,7 @@ export function prepareFilmFootage({timelineId, shape, selections, legacyWord, n
       if (shape.ripple && shot.index === 1 && child.index >= 2 && row.at < 0.7) row.at = 0.7;
       if (shape.ripple && narration && shot.index === 0 && (child.index === 2 || child.index === 3)) {
         row.at = child.index === 2 ? 0 : 1 / 30; row.hold = row.to = 3 / 30;
-        row.app = {astrid: {on: '"repeat"', for: row.hold}};
+        if (!omitAmbiguousAnchors) row.app = {astrid: {on: '"repeat"', for: row.hold}};
       }
       original.set(`${shot.index}:${child.index}`, row);
       originalPins.set(`${shot.index}:${child.index}`, pin);
@@ -156,10 +156,10 @@ export function prepareFilmFootage({timelineId, shape, selections, legacyWord, n
 }
 
 // Prepare the complete historical import around the reusable footage structure.
-export function prepareFilmImport({projectId, timelineId, shape, selections, legacyWord, narration, collectionElement, mediaSize = {width: 1280, height: 720}, name = 'Generated film-shaped timeline'}) {
+export function prepareFilmImport({projectId, timelineId, shape, selections, legacyWord, narration, collectionElement, omitAmbiguousAnchors = false, mediaSize = {width: 1280, height: 720}, name = 'Generated film-shaped timeline'}) {
   if (!projectId) throw new Error('project, timeline, shape and generated selections are required');
   const {internal, shots, occurrences, clips, parentAssets, used} =
-    prepareFilmFootage({timelineId, shape, selections, legacyWord, narration, mediaSize});
+    prepareFilmFootage({timelineId, shape, selections, legacyWord, narration, omitAmbiguousAnchors, mediaSize});
   const id = suffix => `${timelineId}-${suffix}`;
   for (const [n, element] of (shape.elements || []).entries()) {
     const collection = element.kind === 'collection-pack' && collectionElement;

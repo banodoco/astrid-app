@@ -936,6 +936,18 @@ describe('Sprint 8 buildRenderTimelinePayload', () => {
     expect(payload!.output_filename).toContain(baseInput.request.timelineId);
   });
 
+  it('includes editor pack revisions only when supplied by the build', () => {
+    const revisions = { local: 'abc123', astrid_motion: 'abc123' };
+    try {
+      vi.stubGlobal('__ASTRID_EDITOR_PACK_REVISIONS__', revisions);
+      expect(buildRenderTimelinePayload(baseInput).payload?.editor_pack_revisions).toEqual(revisions);
+      vi.stubGlobal('__ASTRID_EDITOR_PACK_REVISIONS__', null);
+      expect(buildRenderTimelinePayload(baseInput).payload).not.toHaveProperty('editor_pack_revisions');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('filters Source tracks from managed payloads and rejects source-only export', () => {
     const resolvedConfig = {
       output: { resolution: '1920x1080', fps: 30, file: 'source-output.mp4' },
@@ -1234,6 +1246,23 @@ describe('Sprint 8 enqueueAstridRuntimeRenderTimeline', () => {
     project_id: 'p',
     correlation_id: 'c',
   };
+
+  it('forwards editor pack revisions to task params only when present', async () => {
+    const revisions = { local: 'abc123', astrid_motion: 'abc123' };
+    const fetchImpl = canonicalRenderFetch();
+    vi.stubGlobal('fetch', fetchImpl);
+    try {
+      const client = new AstridLocalClient({ projectSlug: 'p', baseUrl: 'http://bridge.fake' });
+      expect((await enqueueAstridRuntimeRenderTimeline({ ...payload, editor_pack_revisions: revisions }, { client })).status).toBe('queued');
+      const withRevisions = JSON.parse((fetchImpl.mock.calls[1][1] as RequestInit).body as string);
+      expect(withRevisions.spec.params.editor_pack_revisions).toEqual(revisions);
+      expect((await enqueueAstridRuntimeRenderTimeline(payload, { client })).status).toBe('queued');
+      const withoutRevisions = JSON.parse((fetchImpl.mock.calls[3][1] as RequestInit).body as string);
+      expect(withoutRevisions.spec.params).not.toHaveProperty('editor_pack_revisions');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 
   describe.each([
     ['same-origin (dev:local)', {}, '/api/astrid'],

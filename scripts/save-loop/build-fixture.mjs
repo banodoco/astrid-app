@@ -19,16 +19,16 @@ import {createHash, randomUUID} from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {parseFixtureOptions} from './film-shape.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.resolve(here, '../..');
 const root = process.env.SAVE_LOOP_ROOT;
 const baseUrl = process.env.SAVE_LOOP_BASE_URL;
-const variant = process.env.SAVE_LOOP_VARIANT || 'standard';
+const {variant, clipCount: clipTarget, mediaSize} = parseFixtureOptions(process.argv.slice(2), process.env);
 const largeShots = variant === 'large-shots';
 const startedAt = Date.now();
 const scratch = path.resolve(process.env.SAVE_LOOP_SCRATCH || `${repo}.env/save-loop`);
-const clipTarget = Number(process.env.SAVE_LOOP_CLIPS || 616);
 const byteTarget = Number(process.env.SAVE_LOOP_DOCUMENT_BYTES || 2_600_000);
 const ratioTarget = Number(process.env.SAVE_LOOP_COMMIT_RATIO || 15);
 const imageCount = Math.round(clipTarget * 0.25);
@@ -645,7 +645,7 @@ print(json.dumps(measurement, sort_keys=True))
 `;
 
 async function main() {
-  if (!['standard', 'large-shots'].includes(variant)) throw new Error('invalid SAVE_LOOP_VARIANT');
+  if (variant === 'film-shaped') throw new Error('film-shaped fixture construction is not yet implemented');
   if (!root || !baseUrl) throw new Error('set SAVE_LOOP_ROOT and SAVE_LOOP_BASE_URL for the isolated SL-1 stack');
   const origin = new URL(baseUrl);
   if (!['http:', 'https:'].includes(origin.protocol)) throw new Error('SAVE_LOOP_BASE_URL must use HTTP or HTTPS');

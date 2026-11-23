@@ -39,3 +39,51 @@ test('rejects malformed selection and unsafe JSON number', () => {
   assert.throws(() => prepareFilmImport({projectId: 'p', timelineId: 't', shape: filmShape(), selections: [{}]}));
   assert.throws(() => canonicalJson(0.00001));
 });
+
+test('registry retains measured image, video and audio metadata', () => {
+  const video = {...pins[0], metadata: {width: 1280, height: 720, duration_seconds: 90}};
+  const image = {...pins[1], metadata: {width: 640, height: 360}};
+  const audio = {...pins[2], metadata: {duration_seconds: 90}};
+  const narration = {selection: audio, image, words: ['a', 'b', 'c', 'd'].map((text, i) => ({text, at: i / 10}))};
+  const request = prepareFilmImport({projectId: 'p', timelineId: 't', shape: filmShape(), selections: [video], narration});
+  const assets = request.publication.internal_timeline_revisions[0].payload.registry.assets;
+  assert.deepEqual(assets[image.asset], {media_id: image.object_id, type: 'image', generationId: image.generation_id,
+    variantId: image.variant_id, resolution: '640x360'});
+  assert.deepEqual(assets[video.asset], {media_id: video.object_id, type: 'video', generationId: video.generation_id,
+    variantId: video.variant_id, resolution: '1280x720', duration: 90});
+  assert.deepEqual(assets[audio.asset], {media_id: audio.object_id, type: 'audio', generationId: audio.generation_id,
+    variantId: audio.variant_id, duration: 90});
+  for (const metadata of [{width: 1280}, {width: 0, height: 720}, {duration_seconds: 0}, {duration_seconds: Infinity}])
+    assert.throws(() => prepareFilmImport({projectId: 'p', timelineId: 't', shape: filmShape(),
+      selections: [{...video, metadata}]}), /invalid media/);
+});
+
+test('footage structure can be composed into an import at a nonzero shot offset', async () => {
+  const {prepareFilmFootage} = await import('./film-import.mjs');
+  const shape = filmShape();
+  const shot = shape.shots[1];
+  const child = shot.children[0];
+  shape.overlays = [{shotIndex: shot.index, childIndex: child.index, hold: child.hold}];
+  const parts = prepareFilmFootage({timelineId: 'film', shape, selections: pins});
+  const {publication} = prepareFilmImport({projectId: 'project', timelineId: 'film', shape, selections: pins});
+  const original = parts.internal[1].payload.clips[0];
+  assert.ok(shot.on > 0);
+  assert.equal(parts.clips[0].at, shot.on + original.at);
+  assert.equal(parts.clips[0].hold, original.hold);
+  assert.deepEqual(publication.internal_timeline_revisions, parts.internal);
+  assert.deepEqual(publication.parent_composition.clips[0], parts.clips[0]);
+  assert.deepEqual(publication.parent_composition.registry.assets, parts.parentAssets);
+  assert.deepEqual(publication.dependency_manifest.media.map(row => row.media_id), [...parts.used].sort());
+});
+
+
+test('film output profiles use configured dimensions on parent and every shot', () => {
+  const request = prepareFilmImport({projectId: 'p', timelineId: 't', shape: filmShape(), selections: pins,
+    mediaSize: {width: 640, height: 360}});
+  const expected = {resolution: '640x360', fps: 30, file: 'output.mp4'};
+  assert.deepEqual(request.publication.parent_composition.config.output, expected);
+  for (const shot of request.publication.internal_timeline_revisions)
+    assert.deepEqual(shot.payload.output, expected);
+  assert.throws(() => prepareFilmImport({projectId: 'p', timelineId: 't', shape: filmShape(), selections: pins,
+    mediaSize: {width: 641, height: 360}}), /invalid film output dimensions/);
+});

@@ -18,7 +18,7 @@ export function parseFixtureOptions(args = [], env = {}) {
   if (!['standard', 'large-shots', 'film-shaped'].includes(variant)) throw new Error(`invalid variant: ${variant}`);
   if (prepareMedia && variant !== 'film-shaped') throw new Error('--prepare-media requires --variant film-shaped');
   const count = Number(options['--clips'] ?? env.SAVE_LOOP_CLIPS ?? (variant === 'film-shaped' ? 621 : 616));
-  if (!Number.isSafeInteger(count) || count < (variant === 'film-shaped' ? 8 : 616))
+  if (!Number.isSafeInteger(count) || count < (variant === 'film-shaped' ? 36 : 616))
     throw new Error(`invalid clip count: ${count}`);
   const size = options['--media-size'] ?? env.SAVE_LOOP_MEDIA_SIZE ?? '1280x720';
   const match = /^(\d+)x(\d+)$/.exec(size);
@@ -30,11 +30,13 @@ export function parseFixtureOptions(args = [], env = {}) {
 
 // Use the same generated sources and encoding as the standard large-shots
 // fixture. The source is longer than any single shot in filmShape.
-export function filmMediaCommands({width, height}, video, audio) {
+export function filmMediaCommands({width, height}, video, audio, image) {
   return [
     ['-f', 'lavfi', '-i', `testsrc2=s=${width}x${height}:r=15:d=90`, '-c:v', 'libx264',
       '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-y', video],
     ['-f', 'lavfi', '-i', 'sine=frequency=317:sample_rate=44100:duration=90', '-y', audio],
+    ['-f', 'lavfi', '-i', `testsrc2=s=${width}x${height}:r=1`, '-frames:v', '1',
+      '-threads', '1', '-y', image],
   ];
 }
 

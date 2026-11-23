@@ -24,11 +24,11 @@ test('options reject malformed or incompatible input', () => {
   }
 });
 
-test('builder refuses an incomplete film fixture before stack or media creation', () => {
+test('builder requires an owned isolated stack before film fixture creation', () => {
   const builder = fileURLToPath(new URL('./build-fixture.mjs', import.meta.url));
   const result = spawnSync(process.execPath, [builder, '--variant', 'film-shaped'], {encoding: 'utf8', env: {}});
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /fixture construction is incomplete.*word provenance.*packs.*overlays.*legacy overrun/);
+  assert.match(result.stderr, /set SAVE_LOOP_ROOT and SAVE_LOOP_BASE_URL for the isolated SL-1 stack/);
 });
 
 test('builder prepares generated film media without claiming a fixture', () => {
@@ -43,12 +43,14 @@ test('builder prepares generated film media without claiming a fixture', () => {
     assert.equal(report.status, 'media-only');
     assert.equal(report.clip_count, 42);
     assert.deepEqual(report.media_size, {width: 16, height: 16});
-    for (const file of [report.video, report.audio]) assert.ok(fs.statSync(file).size > 0);
-    const probe = spawnSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries',
-      'stream=width,height', '-of', 'csv=s=x:p=0', report.video], {encoding: 'utf8'});
-    assert.equal(probe.status, 0, probe.stderr);
-    assert.equal(probe.stdout.trim(), '16x16');
-    assert.equal(new Set(report.object_ids).size, 2);
+    for (const file of [report.video, report.audio, report.image]) assert.ok(fs.statSync(file).size > 0);
+    for (const file of [report.video, report.image]) {
+      const probe = spawnSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries',
+        'stream=width,height', '-of', 'csv=s=x:p=0', file], {encoding: 'utf8'});
+      assert.equal(probe.status, 0, probe.stderr);
+      assert.equal(probe.stdout.trim(), '16x16');
+    }
+    assert.equal(new Set(report.object_ids).size, 3);
   } finally { fs.rmSync(scratch, {recursive: true, force: true}); }
 });
 

@@ -22,20 +22,38 @@ export function revisionDigest(value) {
 // selections are actual Runtime media selections for generated video objects.
 // Every selection needs asset, object_id, generation_id and variant_id. The
 // caller must ensure sources are long enough for every requested hold.
-export function prepareFilmImport({projectId, timelineId, shape, selections, legacyWord, name = 'Generated film-shaped timeline'}) {
-  if (!projectId || !timelineId || !shape?.shots?.length || !Array.isArray(selections) || !selections.length)
+export function prepareFilmFootage({timelineId, shape, selections, legacyWord, narration, mediaSize = {width: 1280, height: 720}}) {
+  if (!Number.isSafeInteger(mediaSize?.width) || !Number.isSafeInteger(mediaSize?.height) ||
+      mediaSize.width < 2 || mediaSize.height < 2 || mediaSize.width % 2 || mediaSize.height % 2)
+    throw new Error('invalid film output dimensions');
+  const output = {resolution: `${mediaSize.width}x${mediaSize.height}`, fps: 30, file: 'output.mp4'};
+  if (!timelineId || !shape?.shots?.length || !Array.isArray(selections) || !selections.length)
     throw new Error('project, timeline, shape and generated selections are required');
   for (const pin of selections) {
     if (![pin.asset, pin.generation_id, pin.variant_id].every(v => typeof v === 'string' && v)
         || !/^sha256:[a-f0-9]{64}$/.test(pin.object_id)) throw new Error('invalid media selection');
   }
   if (legacyWord && (!legacyWord.documentId || legacyWord.content?.schema !== 'media.transcript/v1' ||
-      legacyWord.content?.media_id !== selections[0].object_id || typeof legacyWord.content?.source_id !== 'string' ||
+      legacyWord.content?.media_id !== (narration?.selection?.object_id || selections[0].object_id) || typeof legacyWord.content?.source_id !== 'string' ||
       typeof legacyWord.text !== 'string' ||
       !/^[a-zA-Z0-9_-]+$/.test(legacyWord.text) || !Number.isFinite(legacyWord.at) || legacyWord.at < 0))
     throw new Error('invalid legacy word declaration');
+  if (narration && (!narration.selection || !narration.image || !Array.isArray(narration.words) || narration.words.length < 4)) throw new Error('invalid narration fixture');
   const id = suffix => `${timelineId}-${suffix}`;
-  const binding = pin => ({media_id: pin.object_id, type: 'video', generationId: pin.generation_id, variantId: pin.variant_id});
+  const binding = (pin, type = 'video') => {
+    const metadata = pin.metadata;
+    if (metadata !== undefined && (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)))
+      throw new Error('invalid media metadata');
+    const {width, height, duration_seconds: duration} = metadata || {};
+    if ((width !== undefined || height !== undefined)
+        && (!Number.isSafeInteger(width) || width <= 0 || !Number.isSafeInteger(height) || height <= 0))
+      throw new Error('invalid media resolution');
+    if (duration !== undefined && (!Number.isFinite(duration) || duration <= 0))
+      throw new Error('invalid media duration');
+    return {media_id: pin.object_id, type, generationId: pin.generation_id, variantId: pin.variant_id,
+      ...(width !== undefined ? {resolution: `${width}x${height}`} : {}),
+      ...(duration !== undefined ? {duration} : {})};
+  };
   let index = 0;
   const internal = [], shots = [], occurrences = [], used = new Set();
   const original = new Map();
@@ -44,11 +62,23 @@ export function prepareFilmImport({projectId, timelineId, shape, selections, leg
     const shotId = id(`shot-${suffix}`), shotRevision = id(`shot-rev-${suffix}`), internalRevision = id(`internal-rev-${suffix}`);
     const assets = {};
     const clips = shot.children.map(child => {
-      const pin = selections[index++ % selections.length];
-      assets[pin.asset] = binding(pin); used.add(pin.object_id);
+      const pin = narration && shot.index === 0 && child.index === 0 ? narration.image : selections[index++ % selections.length];
+      assets[pin.asset] = binding(pin, pin === narration?.image ? 'image' : 'video'); used.add(pin.object_id);
       const row = {id: `footage-${shot.index}-${child.index}`, clipType: 'media', track: `LV${child.track + 1}`,
         asset: pin.asset, at: child.at, hold: child.hold, from: 0, to: child.hold, speed: 1};
-      if (legacyWord && shot.index === 0 && child.index === 1) {
+      // Occurrence durations are stored in integer milliseconds. Keep child
+      // frame ends inside a rounded-down placement; the last placement retains
+      // its separately declared historical overrun below.
+      if (shot.index !== shape.shots.length - 1 && row.at + row.hold > Math.round(shot.duration * 1000) / 1000) {
+        row.hold -= 1 / 30;
+        row.to = row.hold;
+      }
+      if (narration && shot.index === 0 && child.index < 4) {
+        row.at = narration.words[child.index].at;
+        if (narration.splitAt) row.hold = row.to = 0.1;
+        row.app = {astrid: {on: `"${narration.words[child.index].text}"`, for: row.hold}};
+      }
+      if (legacyWord && !narration && shot.index === 0 && child.index === 1) {
         if (legacyWord.at + child.hold > shot.duration) throw new Error('legacy word clip exceeds its shot');
         row.at = legacyWord.at;
         row.app = {astrid: {on: `"${legacyWord.text}"`, for: child.hold}};
@@ -57,7 +87,27 @@ export function prepareFilmImport({projectId, timelineId, shape, selections, leg
       return row;
     });
     const payload = {tracks: Array.from({length: 4}, (_, n) => ({id: `LV${n + 1}`, kind: 'visual', label: `LV${n + 1}`})),
-      clips, effects: [], audio: [], layout: {}, registry: {assets}, assets: [], output: {fps: 30}};
+      clips, effects: [], audio: [], layout: {}, registry: {assets}, assets: [], output: {...output}};
+    if (narration && shot.index === 0) {
+      const pin = narration.selection;
+      payload.tracks.push({id: 'LA1', kind: 'audio', label: 'LA1'});
+      payload.registry.assets[pin.asset] = binding(pin, 'audio');
+      if (narration.splitAt) {
+        const {gapStart, gapEnd} = narration.splitAt;
+        if (!Number.isFinite(gapStart) || !Number.isFinite(gapEnd) || gapStart <= 0 ||
+            gapEnd - gapStart < 0.5 - 1e-9 || gapEnd >= shot.duration)
+          throw new Error('invalid narration cut gap');
+        payload.clips.push({id: 'narration', clipType: 'audio', track: 'LA1', asset: pin.asset,
+          at: 0, hold: gapStart, from: 0, to: gapStart, speed: 1});
+        const narrationEnd = Math.floor(shot.duration * 30) / 30 - 1 / 30;
+        if (narrationEnd <= gapEnd) throw new Error('narration shot is too short');
+        payload.clips.push({id: 'narration-later', clipType: 'audio', track: 'LA1', asset: pin.asset,
+          at: gapEnd, hold: narrationEnd - gapEnd, from: gapEnd, to: narrationEnd, speed: 1});
+      } else {
+        payload.clips.push({id: 'narration', clipType: 'audio', track: 'LA1', asset: pin.asset, at: 0, hold: shot.duration, from: 0, to: shot.duration, speed: 1});
+      }
+      used.add(pin.object_id);
+    }
     const internalDigest = revisionDigest(payload);
     internal.push({timeline_id: timelineId, revision_id: internalRevision, payload, content_digest: internalDigest});
     const shotPayload = {metadata: {title: `Fixture shot ${shot.index + 1}`}, items: [], pools: [], selected_variants: {},
@@ -81,18 +131,27 @@ export function prepareFilmImport({projectId, timelineId, shape, selections, leg
     const pin = selections[index++ % selections.length];
     parentAssets[pin.asset] = binding(pin); used.add(pin.object_id);
     return {id: `overlay-${n}`, clipType: 'media', track: `V${n + 2}`, asset: pin.asset,
-      at: shape.shots[overlay.shotIndex].on + row.at, hold: overlay.hold, from: 0, to: overlay.hold, speed: 1,
+      at: shape.shots[overlay.shotIndex].on + row.at, hold: row.hold, from: 0, to: row.hold, speed: 1,
       entrance: {type: 'fade', duration: 0.2, params: {easing: n ? 'in' : 'out'}}};
   });
+  return {internal, shots, occurrences, clips, parentAssets, used};
+}
+
+// Prepare the complete historical import around the reusable footage structure.
+export function prepareFilmImport({projectId, timelineId, shape, selections, legacyWord, narration, mediaSize = {width: 1280, height: 720}, name = 'Generated film-shaped timeline'}) {
+  if (!projectId) throw new Error('project, timeline, shape and generated selections are required');
+  const {internal, shots, occurrences, clips, parentAssets, used} =
+    prepareFilmFootage({timelineId, shape, selections, legacyWord, narration, mediaSize});
+  const id = suffix => `${timelineId}-${suffix}`;
   for (const [n, element] of (shape.elements || []).entries()) {
     clips.push({id: `element-${element.kind}`, clipType: n === 0 ? 'text-card' : 'am-discord',
       track: `V${n + 4}`, at: element.at, hold: element.hold,
       params: n === 0 ? {content: 'Generated fixture'} : {}});
   }
   const tracks = ['V1', 'V2', 'V3', 'V4', 'V5', 'V6'].map(id => ({id, kind: 'visual', label: id}));
-  const config = {output: {fps: 30}, clips, tracks};
+  const config = {output: {resolution: `${mediaSize.width}x${mediaSize.height}`, fps: 30, file: 'output.mp4'}, clips, tracks};
   if (legacyWord) config.bundle = {transcriptReferences: {schema: 'media.transcript.references/v1',
-    associations: [{documentId: legacyWord.documentId, mediaId: selections[0].object_id, sourceId: legacyWord.content.source_id}]}};
+    associations: [{documentId: legacyWord.documentId, mediaId: legacyWord.content.media_id, sourceId: legacyWord.content.source_id}]}};
   const parent = {config, registry: {assets: parentAssets}, clips, tracks, occurrences};
   const publication = {project_id: projectId, timeline_id: timelineId, expected_head: null,
     parent_revision_id: id('parent-rev'), content_digest: revisionDigest(parent), parent_composition: parent,

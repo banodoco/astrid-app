@@ -48,9 +48,9 @@ export function parseFixtureOptions(args = [], env = {}) {
 
 // Generated sources are long enough for every shot, with a bounded video rate.
 export function filmMediaCommands({width, height}, video, audio, image, video2, image2, audioDuration = 90, videoDuration = 90) {
-  // Reserve 12 MiB below the precheck for VBV bursts and container overhead.
-  const bitrate = Math.floor(48 * MIB * 8 / videoDuration);
-  const rate = ['-b:v', String(bitrate), '-maxrate', String(bitrate), '-bufsize', String(bitrate)];
+  // Leave room under 10 MiB for VBV bursts and MP4 overhead.
+  const bitrate = Math.floor(6 * MIB * 8 / videoDuration);
+  const rate = ['-b:v', String(bitrate), '-maxrate', String(bitrate), '-bufsize', String(bitrate), '-g', '15'];
   return [
     ['-f', 'lavfi', '-i', `testsrc2=s=${width}x${height}:r=15:d=${videoDuration}`, '-c:v', 'libx264',
       '-preset', 'ultrafast', ...rate, '-pix_fmt', 'yuv420p', '-y', video],

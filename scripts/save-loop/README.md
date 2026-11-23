@@ -45,6 +45,20 @@ An independent optional run exercises large nested shots:
 SAVE_LOOP_CHROME=/absolute/path/to/chrome scripts/save-loop/run.sh --variant large-shots
 ```
 
+The `film-shaped` builder is incomplete and refuses timeline creation. Its
+generated sources can be prepared independently for development:
+
+```sh
+node scripts/save-loop/build-fixture.mjs --variant film-shaped --prepare-media
+```
+
+This writes 90-second synthetic video and audio to a fresh directory under
+`SAVE_LOOP_SCRATCH` (default `<app-checkout>.env/save-loop`) and prints their
+paths and object hashes. `--media-size WIDTHxHEIGHT` selects the even video
+dimensions (default `1280x720`); `--clips` records the requested count (default
+621). Media preparation does not create a timeline or prove the film fixture.
+It uses the same disk floor and generated-source encoding as large shots.
+
 This creates a fresh stack and performs one fixture build and sweep. It retains
 all standard 616 parent clips, 46 normal shot occurrences, the 2.6 MB document
 and 15x one-clip timing requirements, and all matrix targets. In addition,

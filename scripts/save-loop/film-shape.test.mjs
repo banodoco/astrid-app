@@ -1,5 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {spawnSync} from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
 import {filmShape, parseFixtureOptions} from './film-shape.mjs';
 
 test('film options have useful defaults and explicit options override environment', () => {
@@ -13,9 +18,38 @@ test('film options have useful defaults and explicit options override environmen
 test('options reject malformed or incompatible input', () => {
   for (const args of [['--variant'], ['--variant', 'other'], ['--clips', '2'],
     ['--variant', 'film-shaped', '--clips', '1.5'], ['--media-size', '641x360'],
-    ['--media-size', '0x720'], ['--bogus', 'x'], ['--clips', '616', '--clips', '617']]) {
+    ['--media-size', '0x720'], ['--bogus', 'x'], ['--clips', '616', '--clips', '617'],
+    ['--prepare-media'], ['--variant', 'film-shaped', '--prepare-media', '--prepare-media']]) {
     assert.throws(() => parseFixtureOptions(args));
   }
+});
+
+test('builder refuses an incomplete film fixture before stack or media creation', () => {
+  const builder = fileURLToPath(new URL('./build-fixture.mjs', import.meta.url));
+  const result = spawnSync(process.execPath, [builder, '--variant', 'film-shaped'], {encoding: 'utf8', env: {}});
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /fixture construction is incomplete.*word provenance.*packs.*overlays.*legacy overrun/);
+});
+
+test('builder prepares generated film media without claiming a fixture', () => {
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'film-media-test-'));
+  try {
+    const builder = fileURLToPath(new URL('./build-fixture.mjs', import.meta.url));
+    const result = spawnSync(process.execPath, [builder, '--variant', 'film-shaped', '--clips', '42',
+      '--media-size', '16x16', '--prepare-media'],
+    {encoding: 'utf8', env: {PATH: process.env.PATH, SAVE_LOOP_SCRATCH: scratch}});
+    assert.equal(result.status, 0, result.stderr);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.status, 'media-only');
+    assert.equal(report.clip_count, 42);
+    assert.deepEqual(report.media_size, {width: 16, height: 16});
+    for (const file of [report.video, report.audio]) assert.ok(fs.statSync(file).size > 0);
+    const probe = spawnSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries',
+      'stream=width,height', '-of', 'csv=s=x:p=0', report.video], {encoding: 'utf8'});
+    assert.equal(probe.status, 0, probe.stderr);
+    assert.equal(probe.stdout.trim(), '16x16');
+    assert.equal(new Set(report.object_ids).size, 2);
+  } finally { fs.rmSync(scratch, {recursive: true, force: true}); }
 });
 
 test('default shape accounts for every child and parent overlay over 196 seconds', () => {

@@ -22,13 +22,18 @@ export function revisionDigest(value) {
 // selections are actual Runtime media selections for generated video objects.
 // Every selection needs asset, object_id, generation_id and variant_id. The
 // caller must ensure sources are long enough for every requested hold.
-export function prepareFilmImport({projectId, timelineId, shape, selections, name = 'Generated film-shaped timeline'}) {
+export function prepareFilmImport({projectId, timelineId, shape, selections, legacyWord, name = 'Generated film-shaped timeline'}) {
   if (!projectId || !timelineId || !shape?.shots?.length || !Array.isArray(selections) || !selections.length)
     throw new Error('project, timeline, shape and generated selections are required');
   for (const pin of selections) {
     if (![pin.asset, pin.generation_id, pin.variant_id].every(v => typeof v === 'string' && v)
         || !/^sha256:[a-f0-9]{64}$/.test(pin.object_id)) throw new Error('invalid media selection');
   }
+  if (legacyWord && (!legacyWord.documentId || legacyWord.content?.schema !== 'media.transcript/v1' ||
+      legacyWord.content?.media_id !== selections[0].object_id || typeof legacyWord.content?.source_id !== 'string' ||
+      typeof legacyWord.text !== 'string' ||
+      !/^[a-zA-Z0-9_-]+$/.test(legacyWord.text) || !Number.isFinite(legacyWord.at) || legacyWord.at < 0))
+    throw new Error('invalid legacy word declaration');
   const id = suffix => `${timelineId}-${suffix}`;
   const binding = pin => ({media_id: pin.object_id, type: 'video', generationId: pin.generation_id, variantId: pin.variant_id});
   let index = 0;
@@ -43,6 +48,11 @@ export function prepareFilmImport({projectId, timelineId, shape, selections, nam
       assets[pin.asset] = binding(pin); used.add(pin.object_id);
       const row = {id: `footage-${shot.index}-${child.index}`, clipType: 'media', track: `LV${child.track + 1}`,
         asset: pin.asset, at: child.at, hold: child.hold, from: 0, to: child.hold, speed: 1};
+      if (legacyWord && shot.index === 0 && child.index === 1) {
+        if (legacyWord.at + child.hold > shot.duration) throw new Error('legacy word clip exceeds its shot');
+        row.at = legacyWord.at;
+        row.app = {astrid: {on: `"${legacyWord.text}"`, for: child.hold}};
+      }
       original.set(`${shot.index}:${child.index}`, row);
       return row;
     });
@@ -71,7 +81,7 @@ export function prepareFilmImport({projectId, timelineId, shape, selections, nam
     const pin = selections[index++ % selections.length];
     parentAssets[pin.asset] = binding(pin); used.add(pin.object_id);
     return {id: `overlay-${n}`, clipType: 'media', track: `V${n + 2}`, asset: pin.asset,
-      at: overlay.at, hold: overlay.hold, from: 0, to: overlay.hold, speed: 1,
+      at: shape.shots[overlay.shotIndex].on + row.at, hold: overlay.hold, from: 0, to: overlay.hold, speed: 1,
       entrance: {type: 'fade', duration: 0.2, params: {easing: n ? 'in' : 'out'}}};
   });
   for (const [n, element] of (shape.elements || []).entries()) {
@@ -80,7 +90,10 @@ export function prepareFilmImport({projectId, timelineId, shape, selections, nam
       params: n === 0 ? {content: 'Generated fixture'} : {}});
   }
   const tracks = ['V1', 'V2', 'V3', 'V4', 'V5', 'V6'].map(id => ({id, kind: 'visual', label: id}));
-  const parent = {config: {output: {fps: 30}, clips, tracks}, registry: {assets: parentAssets}, clips, tracks, occurrences};
+  const config = {output: {fps: 30}, clips, tracks};
+  if (legacyWord) config.bundle = {transcriptReferences: {schema: 'media.transcript.references/v1',
+    associations: [{documentId: legacyWord.documentId, mediaId: selections[0].object_id, sourceId: legacyWord.content.source_id}]}};
+  const parent = {config, registry: {assets: parentAssets}, clips, tracks, occurrences};
   const publication = {project_id: projectId, timeline_id: timelineId, expected_head: null,
     parent_revision_id: id('parent-rev'), content_digest: revisionDigest(parent), parent_composition: parent,
     internal_timeline_revisions: internal, shot_revisions: shots,
@@ -88,6 +101,7 @@ export function prepareFilmImport({projectId, timelineId, shape, selections, nam
       ({shot_id, revision_id, internal_timeline_revision_id, content_digest})),
       internal_timelines: internal.map(({timeline_id, revision_id, content_digest}) => ({timeline_id, revision_id, content_digest})),
       media: [...used].sort().map(media_id => ({media_id, content_digest: media_id}))}};
-  return {timeline_id: timelineId, name, publication, transcripts: [], text_bindings: [],
+  const transcripts = legacyWord ? [{document_id: legacyWord.documentId, kind: 'media.transcript', content: legacyWord.content}] : [];
+  return {timeline_id: timelineId, name, publication, transcripts, text_bindings: [],
     differences: {missing_effects: [], different_effects: []}};
 }

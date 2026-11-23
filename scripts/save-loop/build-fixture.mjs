@@ -19,13 +19,13 @@ import {createHash, randomUUID} from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {parseFixtureOptions} from './film-shape.mjs';
+import {filmMediaCommands, parseFixtureOptions} from './film-shape.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.resolve(here, '../..');
 const root = process.env.SAVE_LOOP_ROOT;
 const baseUrl = process.env.SAVE_LOOP_BASE_URL;
-const {variant, clipCount: clipTarget, mediaSize} = parseFixtureOptions(process.argv.slice(2), process.env);
+const {variant, clipCount: clipTarget, mediaSize, prepareMedia} = parseFixtureOptions(process.argv.slice(2), process.env);
 const largeShots = variant === 'large-shots';
 const startedAt = Date.now();
 const scratch = path.resolve(process.env.SAVE_LOOP_SCRATCH || `${repo}.env/save-loop`);
@@ -645,7 +645,22 @@ print(json.dumps(measurement, sort_keys=True))
 `;
 
 async function main() {
-  if (variant === 'film-shaped') throw new Error('film-shaped fixture construction is not yet implemented');
+  if (variant === 'film-shaped') {
+    if (!prepareMedia) throw new Error('film-shaped fixture construction is incomplete: word provenance, packs, overlays and legacy overrun are not integrated; use --prepare-media to generate sources only');
+    fs.mkdirSync(scratch, {recursive: true});
+    assertDisk();
+    const dir = fs.mkdtempSync(path.join(scratch, 'film-media-'));
+    const video = path.join(dir, 'video.mp4');
+    const audio = path.join(dir, 'audio.wav');
+    for (const args of filmMediaCommands(mediaSize, video, audio))
+      await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', ...args]);
+    const bytes = fs.statSync(video).size + fs.statSync(audio).size;
+    if (bytes > 1024 ** 3 || freeBytes() - bytes < 15 * 1024 ** 3)
+      throw new Error('generated media exceeds 1 GiB or estimated import would cross the 15 GiB floor');
+    console.log(JSON.stringify({variant, status: 'media-only', clip_count: clipTarget, media_size: mediaSize,
+      video, audio, object_ids: [sha256ObjectId(video), sha256ObjectId(audio)]}, null, 2));
+    return;
+  }
   if (!root || !baseUrl) throw new Error('set SAVE_LOOP_ROOT and SAVE_LOOP_BASE_URL for the isolated SL-1 stack');
   const origin = new URL(baseUrl);
   if (!['http:', 'https:'].includes(origin.protocol)) throw new Error('SAVE_LOOP_BASE_URL must use HTTP or HTTPS');

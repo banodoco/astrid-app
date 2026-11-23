@@ -120,3 +120,50 @@ test('film fixture minimum is enforced before creating media', () => {
     assert.deepEqual(fs.readdirSync(scratch), []);
   } finally { fs.rmSync(scratch, {recursive: true, force: true}); }
 });
+
+test('film media budget follows shape duration and constrains both videos', async () => {
+  const {filmMediaCommands, filmMediaDurations} = await import('./film-shape.mjs');
+  for (const [count, expected] of [[23, 192], [621, 90]]) {
+    const durations = filmMediaDurations(filmFixtureShape(count));
+    assert.equal(durations.videoDuration, expected);
+    const commands = filmMediaCommands({width: 1280, height: 720}, 'a.mp4', 'a.wav', 'a.png', 'b.mp4', 'b.png', durations.audioDuration, durations.videoDuration);
+    for (const command of [commands[0], commands[3]]) {
+      const bitrate = Number(command[command.indexOf('-maxrate') + 1]);
+      assert.ok(bitrate > 0 && bitrate * expected / 8 <= 48 * 1024 ** 2);
+      assert.ok(command.includes('-bufsize'));
+    }
+  }
+});
+
+test('generated media precheck enforces the import margin per file', async () => {
+  const {checkFilmMediaSizes} = await import('./film-shape.mjs');
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'film-budget-test-'));
+  try {
+    const small = path.join(scratch, 'small');
+    const large = path.join(scratch, 'large');
+    fs.writeFileSync(small, 'ok');
+    fs.writeFileSync(large, '');
+    fs.truncateSync(large, 60 * 1024 ** 2);
+    assert.doesNotThrow(() => checkFilmMediaSizes([small, large]));
+    fs.truncateSync(large, 60 * 1024 ** 2 + 1);
+    assert.throws(() => checkFilmMediaSizes([small, large]), /large.*64 MiB.*4 MiB/);
+  } finally { fs.rmSync(scratch, {recursive: true, force: true}); }
+});
+
+test('generated small film videos retain the required duration under the import margin', async () => {
+  const {filmMediaCommands, filmMediaDurations, checkFilmMediaSizes} = await import('./film-shape.mjs');
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'film-duration-test-'));
+  try {
+    for (const count of [23, 621]) {
+      const {audioDuration, videoDuration} = filmMediaDurations(filmFixtureShape(count));
+      const video = path.join(scratch, `${count}.mp4`);
+      const commands = filmMediaCommands({width: 320, height: 180}, video, 'unused.wav', 'unused.png', undefined, undefined, audioDuration, videoDuration);
+      const encode = spawnSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', ...commands[0]], {encoding: 'utf8'});
+      assert.equal(encode.status, 0, encode.stderr);
+      checkFilmMediaSizes([video]);
+      const probe = spawnSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=nw=1:nk=1', video], {encoding: 'utf8'});
+      assert.equal(probe.status, 0, probe.stderr);
+      assert.ok(Math.abs(Number(probe.stdout) - videoDuration) < 0.1);
+    }
+  } finally { fs.rmSync(scratch, {recursive: true, force: true}); }
+});

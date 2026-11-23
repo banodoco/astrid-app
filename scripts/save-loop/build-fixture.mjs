@@ -19,7 +19,7 @@ import {createHash, randomUUID} from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {filmMediaCommands, filmFixtureShape, parseFixtureOptions} from './film-shape.mjs';
+import {checkFilmMediaSizes, filmMediaCommands, filmMediaDurations, filmFixtureShape, parseFixtureOptions} from './film-shape.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.resolve(here, '../..');
@@ -648,9 +648,10 @@ async function buildFilm({resolvedRoot, ports, shape}) {
   const dir = fs.mkdtempSync(path.join(scratch, 'film-media-'));
   const media = {image: [path.join(dir, 'image.png'), path.join(dir, 'image-2.png')], video: [path.join(dir, 'video.mp4'), path.join(dir, 'video-2.mp4')],
     audio: [path.join(dir, 'audio.wav')]};
-  for (const args of filmMediaCommands(mediaSize, media.video[0], media.audio[0], media.image[0], media.video[1], media.image[1], Math.max(90, Math.ceil(shape.shots[1].duration)),
-    Math.max(90, Math.ceil(Math.max(...shape.shots.flatMap(shot => shot.children.map(child => child.hold)))))))
+  const {audioDuration, videoDuration} = filmMediaDurations(shape);
+  for (const args of filmMediaCommands(mediaSize, media.video[0], media.audio[0], media.image[0], media.video[1], media.image[1], audioDuration, videoDuration))
     await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', ...args]);
+  checkFilmMediaSizes(Object.values(media).flat());
   const bytes = Object.values(media).flat().reduce((sum, file) => sum + fs.statSync(file).size, 0);
   if (bytes > 1024 ** 3 || freeBytes() - bytes < 15 * 1024 ** 3)
     throw new Error('generated media exceeds 1 GiB or estimated import would cross the 15 GiB floor');
@@ -708,8 +709,10 @@ async function main() {
     const video = path.join(dir, 'video.mp4');
     const audio = path.join(dir, 'audio.wav');
     const image = path.join(dir, 'image.png');
-    for (const args of filmMediaCommands(mediaSize, video, audio, image))
+    const {audioDuration, videoDuration} = filmMediaDurations(shape);
+    for (const args of filmMediaCommands(mediaSize, video, audio, image, undefined, undefined, audioDuration, videoDuration))
       await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', ...args]);
+    checkFilmMediaSizes([video, audio, image]);
     const bytes = [video, audio, image].reduce((total, file) => total + fs.statSync(file).size, 0);
     if (bytes > 1024 ** 3 || freeBytes() - bytes < 15 * 1024 ** 3)
       throw new Error('generated media exceeds 1 GiB or estimated import would cross the 15 GiB floor');

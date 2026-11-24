@@ -40,17 +40,44 @@ describe('repairLegacyTranscriptReferences (Release 14 shape)', () => {
   });
   it('is ambiguity-safe', () => {
     const dup = { assets: { x: { media_id: MEDIA }, y: { media_id: MEDIA } } };
-    expect(() => load(bundle([{ documentId: 'd', mediaId: MEDIA }]), dup)).toThrow(TimelineBundleParseError);
+    expect(() => load(bundle([{ documentId: 'd', mediaId: MEDIA, sourceId: 's' }]), dup)).toThrow(TimelineBundleParseError);
   });
   it('accepts nothing else', () => {
     expect(() => load(bundle([{ documentId: 'd', mediaId: MEDIA, extra: 1 }]))).toThrow(TimelineBundleParseError);
     expect(() => load(bundle([{ documentId: 'd' }]))).toThrow(TimelineBundleParseError);
-    expect(() => load(bundle([{ documentId: 'd', mediaId: MEDIA }], { schema_version: 2 }))).toThrow(/schema_version/);
+    expect(() => load(bundle([{ documentId: 'd', mediaId: MEDIA, sourceId: 's' }], { schema_version: 2 }))).toThrow(/schema_version/);
     expect(() => load({ transcriptReferences: { schema: 'x', associations: [] } })).toThrow(TimelineBundleParseError);
     expect(() => load({ itemsBySchemaRef: {} })).toThrow(TimelineBundleParseError);
   });
   it('does not touch a bundle with no legacy rows', () => {
     const ok = bundle([{ assetId: 'a', documentId: 'd' }], { schema_version: 1, itemsBySchemaRef: {} });
     expect(repairLegacyTranscriptReferences(ok, registry)).toBe(ok);
+  });
+  it('B1: rows without all three keys are not repaired', () => {
+    expect(() => load(bundle([{ documentId: 'd', mediaId: MEDIA }]))).toThrow(TimelineBundleParseError);
+    expect(() => load(bundle([{ documentId: 'd', sourceId: 'asset-1' }]))).toThrow(TimelineBundleParseError);
+    expect(() => load(bundle([{ documentId: 'd', mediaId: MEDIA, sourceId: '' }]))).toThrow(TimelineBundleParseError);
+  });
+  it('B2: never resolves by sourceId, asset key, or inherited names', () => {
+    expect(() => load(bundle([{ documentId: 'd', mediaId: 'sha256:nope', sourceId: MEDIA }]))).toThrow(TimelineBundleParseError);
+    expect(() => load(bundle([{ documentId: 'd', mediaId: 'asset-1', sourceId: 's' }]))).toThrow(TimelineBundleParseError);
+    expect(() => load(bundle([{ documentId: 'd', mediaId: 'constructor', sourceId: 's' }]))).toThrow(TimelineBundleParseError);
+    expect(() => load(bundle([{ documentId: 'd', mediaId: MEDIA, sourceId: 's' }]), {})).toThrow(TimelineBundleParseError);
+  });
+  it('B2: identity is media_id ?? content_sha256, not either field separately', () => {
+    const N = `sha256:${'c'.repeat(64)}`;
+    const reg = { assets: { z: { media_id: MEDIA, content_sha256: N } } };
+    expect(load(bundle([{ documentId: 'd', mediaId: MEDIA, sourceId: 's' }]), reg).transcriptReferences!.associations[0].assetId).toBe('z');
+    expect(() => load(bundle([{ documentId: 'd', mediaId: N, sourceId: 's' }]), reg)).toThrow(TimelineBundleParseError);
+  });
+  it('B3: fails closed when the resolved assetId is already used', () => {
+    expect(() => load(bundle([
+      { assetId: 'asset-1', documentId: 'x' },
+      { documentId: 'd', mediaId: MEDIA, sourceId: 's' },
+    ]))).toThrow(TimelineBundleParseError);
+    expect(() => load(bundle([
+      { documentId: 'd1', mediaId: MEDIA, sourceId: 's' },
+      { documentId: 'd2', mediaId: MEDIA, sourceId: 't' },
+    ]))).toThrow(TimelineBundleParseError);
   });
 });

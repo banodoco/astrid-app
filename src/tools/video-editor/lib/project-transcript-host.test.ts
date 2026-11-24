@@ -64,6 +64,30 @@ describe("transcript reference optional ids across a save rewrite", () => {
       transcriptReferences: a.dataRef.current.transcriptReferences,
     })).not.toThrow();
   });
+  it("refreshes mediaId/sourceId to the new document when a different document is selected", async () => {
+    const { r } = repository(),
+      a = await editor(r),
+      first = docId(await a.host.importTranscript({ document: handoff, associationAssetId: "alias" })),
+      second = docId(await a.host.importTranscript({
+        document: { ...handoff, source_id: "second" } as never,
+        associationAssetId: "alias",
+      }));
+    a.dataRef.current = {
+      ...a.dataRef.current,
+      transcriptReferences: refs([
+        { assetId: "alias", documentId: first, mediaId: media, sourceId: "default" },
+      ]),
+    };
+    await a.host.selectProjectSource({ assetId: "alias", documentId: second });
+    const row = a.dataRef.current.transcriptReferences!.associations[0];
+    const doc = await r.get(second);
+    expect(row).toEqual({
+      assetId: "alias",
+      documentId: second,
+      mediaId: doc.content.media_id,
+      sourceId: doc.content.source_id,
+    });
+  });
   it("does not invent ids on a re-selected row that had none", async () => {
     const { r } = repository(),
       a = await editor(r),

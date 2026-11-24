@@ -13,25 +13,24 @@ const asObject = (value: unknown): UnknownRecord | undefined =>
 
 const nonEmpty = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
 
-const LEGACY_KEYS = new Set(['documentId', 'mediaId', 'sourceId']);
+const LEGACY_KEYS = ['documentId', 'mediaId', 'sourceId'] as const;
 
-const isLegacyRow = (row: UnknownRecord): boolean =>
-  nonEmpty(row.documentId)
-  && !('assetId' in row)
-  && (nonEmpty(row.mediaId) || nonEmpty(row.sourceId))
-  && Object.keys(row).every((key) => LEGACY_KEYS.has(key))
-  && (row.mediaId === undefined || nonEmpty(row.mediaId))
-  && (row.sourceId === undefined || nonEmpty(row.sourceId));
+/** Exactly the Agent's `with_reference` row: all three keys, non-empty strings. */
+const isLegacyRow = (row: UnknownRecord): boolean => {
+  const keys = Object.keys(row);
+  return keys.length === LEGACY_KEYS.length
+    && LEGACY_KEYS.every((key) => Object.hasOwn(row, key) && nonEmpty(row[key]));
+};
 
-/** Registry asset ids whose key, media_id or content_sha256 equals `id`. */
-function resolveAssetId(assets: UnknownRecord, id: string): string | undefined {
-  if (id in assets) return id;
-  const matches = Object.entries(assets)
-    .filter(([, asset]) => {
-      const record = asObject(asset);
-      return record?.media_id === id || record?.content_sha256 === id;
-    })
-    .map(([key]) => key);
+/** Asset ids whose identity `media_id ?? content_sha256` (own properties) equals `mediaId`. */
+function resolveAssetId(assets: UnknownRecord, mediaId: string): string | undefined {
+  const matches = Object.keys(assets).filter((key) => {
+    const asset = asObject(assets[key]);
+    if (!asset) return false;
+    const identity = (Object.hasOwn(asset, 'media_id') ? asset.media_id : undefined)
+      ?? (Object.hasOwn(asset, 'content_sha256') ? asset.content_sha256 : undefined);
+    return identity === mediaId;
+  });
   return matches.length === 1 ? matches[0] : undefined;
 }
 
@@ -51,18 +50,19 @@ export function repairLegacyTranscriptReferences(bundle: unknown, registry: unkn
   if (rows.some((row) => row === undefined)) return bundle;
   if (!(rows as UnknownRecord[]).some(isLegacyRow)) return bundle;
 
-  const assets = asObject(asObject(registry)?.assets) ?? {};
+  const assets = asObject(Object.hasOwn(asObject(registry) ?? {}, 'assets') ? asObject(registry)?.assets : undefined) ?? {};
   const repaired: UnknownRecord[] = [];
+  const used = new Set<string>(
+    (rows as UnknownRecord[]).filter((row) => !isLegacyRow(row)).map((row) => String(row.assetId)),
+  );
   for (const row of rows as UnknownRecord[]) {
     if (!isLegacyRow(row)) {
       repaired.push(row);
       continue;
     }
-    const assetId = [row.mediaId, row.sourceId]
-      .filter(nonEmpty)
-      .map((id) => resolveAssetId(assets, id))
-      .find((id) => id !== undefined);
-    if (assetId === undefined) return bundle;
+    const assetId = resolveAssetId(assets, row.mediaId as string);
+    if (assetId === undefined || used.has(assetId)) return bundle;
+    used.add(assetId);
     repaired.push({ assetId, ...row });
   }
   return {

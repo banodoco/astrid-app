@@ -140,3 +140,14 @@ export function sweepAbortedRecord(error, activeRow) {
     iteration:activeRow?.iteration ?? null, bound:error.bound,
     limit_ms:error.limitMs, elapsed_ms:error.elapsedMs};
 }
+
+export async function finishAbortedSweep(error, {activeRow, record, close}) {
+  // Status precedes any further page call so a stalled mark read cannot
+  // conceal the bound that was hit. The caller supplies a bounded close.
+  try {
+    record(sweepAbortedRecord(error, activeRow));
+    if (activeRow) await recordThrownRow(activeRow, error, record);
+  } finally {
+    await close();
+  }
+}

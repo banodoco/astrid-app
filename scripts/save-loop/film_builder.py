@@ -108,7 +108,9 @@ def build(cfg, client):
         collection_element = collection_reference(pack_path)
     else:
         collection_element = None
+    omit_ambiguous = cfg.get('omit_ambiguous_anchors', False)
     spec = {'collectionElement': collection_element, 'projectId': project, 'timelineId': timeline, 'shape': shape, 'selections': pins['video'],
+            'omitAmbiguousAnchors': omit_ambiguous,
             'legacyWord': {'documentId': document_id, 'text': 'w0001', 'at': 0.1, 'content': content},
             'mediaSize': {'width': pins['video'][0]['metadata']['width'], 'height': pins['video'][0]['metadata']['height']},
             'narration': {'selection': pins['audio'][0], 'image': pins['image'][0],
@@ -177,7 +179,14 @@ def build(cfg, client):
     retime = ShotWordRetimeInputs(saved)
     shot = saved['shots'][f'{timeline}-shot-{narration_index:04d}']['internal_timeline']
     targets = []
-    for i, word in enumerate(targets_words):
+    if omit_ambiguous:
+        omitted_index = 0 if shape.get('ripple') else narration_index
+        omitted_shot = saved['shots'][f'{timeline}-shot-{omitted_index:04d}']['internal_timeline']
+        for i in (2, 3):
+            child = next(row for row in omitted_shot['clips'] if row['id'] == f'footage-{omitted_index}-{i}')
+            if 'on' in child.get('app', {}).get('astrid', {}):
+                raise RuntimeError('ambiguous word declaration was not omitted')
+    for i, word in enumerate(targets_words[:2] if omit_ambiguous else targets_words):
         target_index = 0 if shape.get('ripple') and i >= 2 else narration_index
         target_shot = saved['shots'][f'{timeline}-shot-{target_index:04d}']['internal_timeline']
         child = next(row for row in target_shot['clips'] if row['id'] == f'footage-{target_index}-{i}')
@@ -217,6 +226,7 @@ def build(cfg, client):
     return {'project_id': project, 'timeline_id': timeline, 'accepted_head': reopened['head'],
             'import_receipt_id': imported['receipt']['receipt_id'], 'anchor_receipt_id': result['receipt']['receipt_id'],
             'media': imports, 'transcript_pin': pin, 'targets': targets,
+            **({'omitted_ambiguous_anchors': 2} if omit_ambiguous else {}),
             'ripple_cut': {'start_seconds': shape['shots'][narration_index]['on'] + 0.2, 'end_seconds': shape['shots'][narration_index]['on'] + 0.7,
                            'later_narration_selector': f'occurrence:{timeline}-occ-{narration_index}/clip:narration-later'},
             'measurements': {'shots': len(saved['placements']), 'child_clips': child_count,

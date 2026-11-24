@@ -101,7 +101,8 @@ describe('expected-failure marker ban', () => {
   });
 
   describe('quarantine registry rules', () => {
-    const [entry] = DIRECT_JOURNEY_EXCEPTIONS;
+    // A fixed copy of a registered entry, so these date rules don't change when the live expiry is renewed.
+    const entry = { ...DIRECT_JOURNEY_EXCEPTIONS[0], expiry: '2026-11-25' };
     const today = new Date('2026-11-11T12:00:00Z');
     it('accepts the registered entry', () => assert.deepEqual(validateExceptions([entry], today), []));
     for (const field of ['issue', 'owner', 'expiry', 'title', 'id', 'file']) {

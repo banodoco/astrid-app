@@ -100,7 +100,13 @@ def build(cfg, client):
         raise RuntimeError('generated sources are too short for fixture clips')
     words = [[0.01, 0.04, 'repeat'], [0.05, 0.08, 'repeat'], [0.1, 0.2, 'w0001'], [1.1, 1.2, 'w0002']]
     targets_words = [words[2], words[3], words[0], words[1]]
-    content = build_transcript(pins['audio'][0]['object_id'], 'film-line', 'repeat repeat w0001 w0002', words)
+    # The production fixture ends narration at the last target word. Generic
+    # shapes keep their longer narration, so extend its transcript to match.
+    if not shape.get('narrationTranscriptEnd'):
+        end = int(shape['shots'][1 if shape.get('ripple') else 0]['duration'] * 30) / 30 - 1 / 30
+        if end > words[-1][1]:
+            words.append([end - 0.1, end, 'ending'])
+    content = build_transcript(pins['audio'][0]['object_id'], 'film-line', ' '.join(w[2] for w in words), words)
     document_id = transcript_document_id(project, content['media_id'], content['source_id'])
     pack_path = cfg.get('collection_pack_path')
     if pack_path:
@@ -116,7 +122,8 @@ def build(cfg, client):
             'narration': {'selection': pins['audio'][0], 'image': pins['image'][0],
                           **({'overlayImage': pins['image'][1]} if len(pins['image']) > 1 else {}),
                           'words': [{'text': w[2], 'at': w[0]} for w in targets_words],
-                          'splitAt': {'gapStart': 0.2, 'gapEnd': 0.7}}}
+                          'splitAt': {'gapStart': 0.2, 'gapEnd': 0.7},
+                          **({'end': words[-1][1]} if shape.get('narrationTranscriptEnd') else {})}}
     js = "const {prepareFilmImport}=await import(process.argv[1]);let s='';for await(const x of process.stdin)s+=x;console.log(JSON.stringify(prepareFilmImport(JSON.parse(s))));"
     prepared = json.loads(subprocess.run([cfg['node'], '--input-type=module', '-e', js, cfg['film_import_module']],
         input=json.dumps(spec), text=True, capture_output=True, check=True).stdout)

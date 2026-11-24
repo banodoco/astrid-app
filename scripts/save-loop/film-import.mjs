@@ -106,8 +106,9 @@ export function prepareFilmFootage({timelineId, shape, selections, legacyWord, n
           throw new Error('invalid narration cut gap');
         payload.clips.push({id: 'narration', clipType: 'audio', track: 'LA1', asset: pin.asset,
           at: 0, hold: gapStart, from: 0, to: gapStart, speed: 1});
-        const narrationEnd = Math.floor(shot.duration * 30) / 30 - 1 / 30;
-        if (narrationEnd <= gapEnd) throw new Error('narration shot is too short');
+        const narrationEnd = narration.end ?? (Math.floor(shot.duration * 30) / 30 - 1 / 30);
+        if (!Number.isFinite(narrationEnd) || narrationEnd <= gapEnd || narrationEnd > shot.duration)
+          throw new Error('invalid narration end');
         payload.clips.push({id: 'narration-later', clipType: 'audio', track: 'LA1', asset: pin.asset,
           at: gapEnd, hold: narrationEnd - gapEnd, from: gapEnd, to: narrationEnd, speed: 1});
       } else {

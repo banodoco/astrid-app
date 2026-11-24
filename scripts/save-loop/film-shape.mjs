@@ -119,5 +119,5 @@ export function filmFixtureShape(clipTarget) {
     throw new Error('film fixture minimum clip count is 23');
   const clipCount = clipTarget - 2;
   const shotCount = Math.min(46, Math.floor((clipTarget - 4) / 8), 1 + Math.floor((clipCount - 17) / 4));
-  return filmShape({ripple: true, clipCount, shotCount});
+  return {...filmShape({ripple: true, clipCount, shotCount}), narrationTranscriptEnd: true};
 }

@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import type { Plugin } from 'vite';
+import { verifyMotionProjection } from '../../scripts/astrid-landing/motion-projection.mjs';
 
 export type AppBuildInfo = { app: string; release: number };
 
@@ -43,7 +44,14 @@ export function resolveEditorPackRevisions(selectedCheckout?: string, vendorRoot
       const match = /^astrid\/packs\/([a-z][a-z0-9_]*)\/(?:rendering\/)?elements\/.+\.(?:ts|tsx)$/.exec(file);
       if (match) packIds.add(match[1]);
     }
-    return Object.fromEntries([...packIds].map((id) => [id, commit]));
+    const revisions = Object.fromEntries([...packIds].map((id) => [id, commit]));
+    if (packIds.has('astrid_motion')) {
+      const digest = verifyMotionProjection(vendorRoot, provenance);
+      // Preserve the existing upstream commit as provenance. The additive
+      // field is the content identity compared by the render host.
+      if (digest) revisions.astrid_motion_tree = digest;
+    }
+    return revisions;
   } catch {
     return null;
   }

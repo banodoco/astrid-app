@@ -157,7 +157,7 @@ export default defineConfig(() => {
       alias: {
         "@": path.resolve(__dirname, "../../src"),
         "@astrid/editor-sdk": path.resolve(__dirname, "../../src/sdk/index.ts"),
-        ...(astridSource ? { "@astrid": astridSource.sourceRoot } : {}),
+        ...(astridSource ? { "@astrid": astridSource.sourceRoot, "@astrid-rendering/shared": path.join(astridSource.sourceRoot, "packs/rendering/shared") } : {}),
         ...(astridPublicSource ? { "@astrid-public": astridPublicSource.sourceRoot } : {}),
         // Sprint 5: deduplicate React / Remotion / @banodoco/* across the
         // linked timeline-composition + timeline-theme-* packages so a

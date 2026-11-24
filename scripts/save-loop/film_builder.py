@@ -52,6 +52,34 @@ def prove_target(retime, selector, child, word, document_id, source, word_id, am
     return 'resolved'
 
 
+def readback_extents(saved):
+    """Extents of an accepted head, in seconds: the end of the last clip and of the last occurrence."""
+    content = max([row['at'] + row['hold'] for row in saved['parent']['clips']] or [0])
+    occurrence = 0
+    for placement in saved['placements']:
+        start = placement['placement']['start_ms'] / 1000
+        occurrence = max(occurrence, start + placement['duration_ms'] / 1000)
+        for row in saved['shots'][placement['shot_id']]['internal_timeline']['clips']:
+            content = max(content, start + row['at'] + row['hold'])
+    return {'content_extent_seconds': round(content, 3), 'occurrence_extent_seconds': round(occurrence, 3)}
+
+
+def verify_readback(plan, accepted, tolerance=0.002):
+    """Fail unless the accepted head has the planned shots, child/parent counts and extents.
+
+    Individual clip holds are not compared, so the documented short shot-2 children of the
+    default build (and the real-extent ones under --content-extent) both pass."""
+    problems = []
+    for key in ('shots', 'child_clips', 'parent_clips'):
+        if accepted[key] != plan[key]:
+            problems.append(f'{key}: planned {plan[key]}, accepted {accepted[key]}')
+    for key in ('content_extent_seconds', 'occurrence_extent_seconds'):
+        if abs(accepted[key] - plan[key]) > tolerance:
+            problems.append(f'{key}: planned {plan[key]}, accepted {accepted[key]}')
+    if problems:
+        raise RuntimeError('accepted head does not match the planned fixture: ' + '; '.join(problems))
+
+
 def build(cfg, client):
     project, timeline = cfg['project_id'], cfg['timeline_id']
     transport = client._remote._transport
@@ -96,6 +124,8 @@ def build(cfg, client):
             imports.append({'kind': kind, 'selection': selected, 'receipt_id': receipt['receipt_id']})
     shape = cfg['shape']
     max_hold = max(child['hold'] for shot in shape['shots'] for child in shot['children'])
+    if shape.get('contentExtent'):
+        max_hold = max(max_hold, shape['shots'][1]['duration'])
     if min(p['metadata']['duration_seconds'] for p in pins['video']) < max_hold or pins['audio'][0]['metadata']['duration_seconds'] < shape['shots'][1 if shape.get('ripple') else 0]['duration']:
         raise RuntimeError('generated sources are too short for fixture clips')
     words = [[0.01, 0.04, 'repeat'], [0.05, 0.08, 'repeat'], [0.1, 0.2, 'w0001'], [1.1, 1.2, 'w0002']]
@@ -124,9 +154,11 @@ def build(cfg, client):
                           'words': [{'text': w[2], 'at': w[0]} for w in targets_words],
                           'splitAt': {'gapStart': 0.2, 'gapEnd': 0.7},
                           **({'end': words[-1][1]} if shape.get('narrationTranscriptEnd') else {})}}
-    js = "const {prepareFilmImport}=await import(process.argv[1]);let s='';for await(const x of process.stdin)s+=x;console.log(JSON.stringify(prepareFilmImport(JSON.parse(s))));"
-    prepared = json.loads(subprocess.run([cfg['node'], '--input-type=module', '-e', js, cfg['film_import_module']],
+    js = ("const {prepareFilmImport,planFilmImport}=await import(process.argv[1]);let s='';for await(const x of process.stdin)s+=x;"
+          "const p=prepareFilmImport(JSON.parse(s));console.log(JSON.stringify({prepared:p,plan:planFilmImport(p)}));")
+    planned = json.loads(subprocess.run([cfg['node'], '--input-type=module', '-e', js, cfg['film_import_module']],
         input=json.dumps(spec), text=True, capture_output=True, check=True).stdout)
+    prepared, plan = planned['prepared'], planned['plan']
     imported = transport.import_timeline(project, {**prepared, 'source': {'via': 'script'}}, idempotency_key='film-import-' + timeline)
     imported_data = data(imported)
     if imported_data.get('timeline_id') != timeline or not imported.get('receipt', {}).get('receipt_id'):
@@ -226,6 +258,8 @@ def build(cfg, client):
                         or asset.get('resolution') != f"{media_pin['metadata']['width']}x{media_pin['metadata']['height']}"
                         or (kind == 'video' and asset.get('duration') != media_pin['metadata']['duration_seconds'])):
                     raise RuntimeError('accepted overlay media identity or metadata differs from import')
+    readback = readback_extents(saved)
+    verify_readback(plan, {'shots': len(saved['placements']), 'child_clips': child_count, 'parent_clips': parent_count, **readback})
     last = saved['placements'][0 if shape.get('ripple') else -1]
     last_shot = saved['shots'][last['shot_id']]['internal_timeline']
     if not any(row['at'] + row['hold'] > last['duration_ms'] / 1000 for row in last_shot['clips']):
@@ -237,7 +271,12 @@ def build(cfg, client):
             'ripple_cut': {'start_seconds': shape['shots'][narration_index]['on'] + 0.2, 'end_seconds': shape['shots'][narration_index]['on'] + 0.7,
                            'later_narration_selector': f'occurrence:{timeline}-occ-{narration_index}/clip:narration-later'},
             'measurements': {'shots': len(saved['placements']), 'child_clips': child_count,
-                             'parent_clips': parent_count, 'duration_seconds': shape['durationSeconds']},
+                             'parent_clips': parent_count,
+                             # duration_seconds is the occurrence extent (about 195.967 s for the default
+                             # build), not a 196 s film: the default build's shot-2 children are short.
+                             'duration_seconds': readback['occurrence_extent_seconds'],
+                             'content_extent_seconds': readback['content_extent_seconds'],
+                             'occurrence_extent_seconds': readback['occurrence_extent_seconds']},
             'packs': packs or 'pending: fixture pack elements are not admitted', 'render_verified': False}
 
 

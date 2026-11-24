@@ -19,18 +19,19 @@ import {createHash, randomUUID} from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {checkFilmMediaSizes, filmMediaCommands, filmMediaDurations, filmFixtureShape, parseFixtureOptions} from './film-shape.mjs';
+import {checkFilmMediaSizes, filmMediaCommands, filmMediaDurations, filmFixtureShape, fixtureTargets, parseFixtureOptions,
+  STANDARD_MINIMUM_CLIPS} from './film-shape.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.resolve(here, '../..');
 const root = process.env.SAVE_LOOP_ROOT;
 const baseUrl = process.env.SAVE_LOOP_BASE_URL;
-const {variant, clipCount: clipTarget, mediaSize, prepareMedia, omitAmbiguousAnchors} = parseFixtureOptions(process.argv.slice(2), process.env);
+const {variant, clipCount: clipTarget, mediaSize, prepareMedia, omitAmbiguousAnchors, contentExtent} = parseFixtureOptions(process.argv.slice(2), process.env);
 const largeShots = variant === 'large-shots';
 const startedAt = Date.now();
 const scratch = path.resolve(process.env.SAVE_LOOP_SCRATCH || `${repo}.env/save-loop`);
-const byteTarget = Number(process.env.SAVE_LOOP_DOCUMENT_BYTES || 2_600_000);
-const ratioTarget = Number(process.env.SAVE_LOOP_COMMIT_RATIO || 15);
+const {documentBytes: byteTarget, documentBytesSource, commitRatio: ratioTarget, profileDocumentBytes} =
+  fixtureTargets(clipTarget, process.env);
 const imageCount = Math.round(clipTarget * 0.25);
 const videoCount = Math.round(clipTarget * 0.06);
 const audioCount = clipTarget - imageCount - videoCount;
@@ -423,6 +424,29 @@ def commit_batch(tl, timeline, label, key, edit, command_count):
     last_results[timeline] = row
     print(f"accepted {label}: {command_count} commands elapsed={elapsed_ms:.1f}ms receipt={row['receipt_id']} revision={row['accepted_revision_id']}", flush=True)
 
+def stage_child_media(t, owner, row, pin, kind):
+    # Mirror the SDK's own t.add() media path for a child clip. Each tl.commit()
+    # evaluation is a fresh commit session with no verified media, so verify the
+    # exact selection through the Runtime first (media_add._selection, as t.add
+    # does for a selection mapping), then stage the command captured, so the
+    # submitted command carries the recorder's created claims that the Runtime
+    # provider authenticates. A raw t.command() has neither.
+    from astrid.sdk.timeline.media_add import _selection
+    selection, verified = _selection(t.session, t.bundle, pin)
+    if selection != pin or verified.get('selection') != pin:
+        raise RuntimeError(f'Runtime verification differs from the imported {kind} selection')
+    if str(verified.get('media_type', '')).split('/', 1)[0] != kind:
+        raise RuntimeError(f'Runtime verified child media is not {kind}')
+    verified_media = [item for item in t._verified_media if item.get('selection') != pin]
+    verified_media.append({**verified, 'object_id': pin['object_id'],
+                           'pin': {'media_id': pin['object_id'], 'content_digest': pin['object_id']}})
+    t._capture_free_edits()
+    t._append([{'schema_version': 1, 'op': 'occurrence.add-media', 'version': '1',
+                'select': owner, 'args': {'row': row, 'media': pin},
+                'intent': {'ownership': 'occurrence'}}],
+              label='Add generated child media', verified_media=verified_media, capture=True)
+    t._verified_media = verified_media
+
 def populate(timeline, *, control=False):
     targets = {'video': [], 'audio': [], 'image': []}
     with AstridClient.open_existing_from_launcher() as client:
@@ -504,9 +528,7 @@ def populate(timeline, *, control=False):
                             row = {'id': f'large-child-{i}-{j:02d}', 'clipType': 'media' if kind == 'video' else 'audio',
                                    'track': 'LV' if kind == 'video' else 'LA', 'asset': pin['asset'],
                                    'at': (j // 2) * 30, 'hold': 30, 'from': 0, 'to': 30, 'speed': 1}
-                            t.command({'schema_version': 1, 'op': 'occurrence.add-media', 'version': '1',
-                                       'select': owner, 'args': {'row': row, 'media': pin},
-                                       'intent': {'ownership': 'occurrence'}}, label='Add generated child media')
+                            stage_child_media(t, owner, row, pin, kind)
                     commit_batch(tl, timeline, f'Add children {i} {start}', f'p77-{timeline}-children-{i}-{start}', add_children, 8)
         document = canonical_documents[timeline]
         actual_tracks = root_tracks(document)
@@ -701,7 +723,7 @@ async function buildFilm({resolvedRoot, ports, shape}) {
 }
 
 async function main() {
-  const shape = variant === 'film-shaped' ? filmFixtureShape(clipTarget) : null;
+  const shape = variant === 'film-shaped' ? filmFixtureShape(clipTarget, {contentExtent}) : null;
   if (variant === 'film-shaped' && prepareMedia) {
     fs.mkdirSync(scratch, {recursive: true});
     assertDisk();
@@ -726,7 +748,8 @@ async function main() {
   if (!['localhost', '127.0.0.1', '[::1]'].includes(origin.hostname))
     throw new Error('save-loop fixture creation requires the owned local isolated stack');
   if (origin.pathname !== '/' || origin.search || origin.hash) throw new Error('SAVE_LOOP_BASE_URL must be a local origin without a path or query');
-  if (variant !== 'film-shaped' && (!Number.isInteger(clipTarget) || clipTarget < 616)) throw new Error('SAVE_LOOP_CLIPS must be an integer >= 616');
+  if (variant !== 'film-shaped' && (!Number.isInteger(clipTarget) || clipTarget < STANDARD_MINIMUM_CLIPS))
+    throw new Error(`SAVE_LOOP_CLIPS must be an integer >= ${STANDARD_MINIMUM_CLIPS}`);
   const resolvedRoot = fs.realpathSync(root);
   const marker = path.join(resolvedRoot, '.sl1-stack-owned');
   if (resolvedRoot !== path.resolve(root) || !fs.existsSync(marker)
@@ -882,8 +905,12 @@ async function main() {
     verified_object_id_count: headObjectIds.length, route: `/api/runtime${headRevisionRoute}`};
   assertDisk();
   const {named, ...measuredValues} = measurement;
-  const passed = measurement.clip_count >= clipTarget && measurement.document_bytes >= byteTarget
-    && measurement.warm_move_median_ratio >= ratioTarget;
+  const missed = [
+    measurement.clip_count < clipTarget && `clips ${measurement.clip_count} against ${clipTarget}`,
+    measurement.document_bytes < byteTarget && `document ${measurement.document_bytes} bytes against ${byteTarget} (${documentBytesSource})`,
+    !(measurement.warm_move_median_ratio >= ratioTarget) && `warm-move ratio ${measurement.warm_move_median_ratio} against ${ratioTarget}`,
+  ].filter(Boolean);
+  const passed = missed.length === 0;
   const manifest = {
     schema_version: 1,
     variant,
@@ -906,7 +933,10 @@ async function main() {
       retained_object_ids: parentObjectIds, drop_files: dropFiles,
       drop_object_ids: dropObjectIds},
     measurement: {...measuredValues, targets: {clip_count: clipTarget, document_bytes: byteTarget,
-      warm_move_median_ratio: ratioTarget}, status: passed ? 'pass' : 'fail'},
+      document_bytes_source: documentBytesSource, warm_move_median_ratio: ratioTarget},
+    profile_document_bytes: profileDocumentBytes,
+    profile_document_bytes_met: measurement.document_bytes >= profileDocumentBytes,
+    status: passed ? 'pass' : 'fail', ...(passed ? {} : {missed})},
     live_proof: {stack_url: baseUrl, generated_at: new Date().toISOString(), second_machine: 'pending'},
   };
   if (largeShots) Object.assign(manifest.measurement.large_shots, {
@@ -921,7 +951,10 @@ async function main() {
   console.log(`Video target: ${named.video[0].clip_id}`);
   console.log(`Audio target: ${named.audio[0].clip_id}`);
   console.log(JSON.stringify(manifest.measurement, null, 2));
-  if (!passed) throw new Error(`measured fixture misses target; use observed size/ratio to set SAVE_LOOP_CLIPS higher; manifest retained at ${manifestPath}`);
+  if (measurement.document_bytes < profileDocumentBytes)
+    console.log(`Document ${measurement.document_bytes} bytes is below the ${profileDocumentBytes}-byte owner profile; `
+      + 'this fixture reproduces the profile clip count and track layout, not its document size.');
+  if (!passed) throw new Error(`measured fixture misses target: ${missed.join('; ')}; manifest retained at ${manifestPath}`);
 }
 
 main().catch(error => { console.error(`build-fixture: ${error.message}`); process.exitCode = 1; });

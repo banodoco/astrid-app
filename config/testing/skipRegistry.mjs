@@ -15,7 +15,7 @@
 // name and the helper evaluates it, so no catch-all can turn an unrelated error into a declared skip.
 // Share this definition with the Runtime (tests/lanes.py) and Astrid agent repos.
 
-import { agentCorpusCheckoutUnavailableReason, ffmpegUnavailableReason, harnessUnavailableReason, isWindows, macosLockfMissing, pwshUnavailableReason, symlinkCreationRefused } from './skipConditions.mjs';
+import { agentCorpusCheckoutUnavailableReason, ffmpegUnavailableReason, harnessUnavailableReason, isWindows, macosLockfMissing, pwshUnavailableReason, saveLoopPythonUnset, symlinkCreationRefused } from './skipConditions.mjs';
 
 /**
  * Skips reported at run time. `applies` = the predicate (true or a reason string when the skip applies, false when the test runs). `ci` = CI jobs (job ids in .github/workflows) where the skip condition is
@@ -72,6 +72,13 @@ export const SKIP_REGISTRY = {
     reason: 'the PowerShell installer tests need a PowerShell binary on this machine; CI runs them in installer-powershell, which installs pwsh first',
     applies: pwshUnavailableReason,
     ci: ['installer-powershell'],
+  },
+  'save-loop-runtime-python': {
+    skipWhen: 'SAVE_LOOP_TEST_PYTHON is not set: the save-loop Runtime import tests need a Python with the pinned Runtime installed',
+    reason: 'the save-loop Runtime import tests run only with SAVE_LOOP_TEST_PYTHON pointing at a Python that already has the pinned Runtime installed',
+    applies: saveLoopPythonUnset,
+    ci: [],
+    manual: 'opt-in: no CI job sets SAVE_LOOP_TEST_PYTHON; run with SAVE_LOOP_TEST_PYTHON=<python with the pinned Runtime> node --test scripts/save-loop/film-import.runtime.test.mjs scripts/save-loop/film-overrun.runtime.test.mjs',
   },
   'windows-console-interruption-harness': {
     skipWhen: "process.platform === 'win32'",

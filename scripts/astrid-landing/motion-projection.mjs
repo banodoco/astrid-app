@@ -103,14 +103,21 @@ export function applyMotionProjection(out, commit, projection, agentRepo) {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'astrid-motion-catalog-'));
   try {
     const source = path.join(temp, 'source.ts'), generated = path.join(temp, 'generated.ts');
+    const snapshot = path.join(temp, 'astrid_motion');
+    fs.mkdirSync(snapshot);
+    for (const [relative, bytes] of files) {
+      const target = path.join(snapshot, relative);
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, bytes, { flag: 'wx' });
+    }
+    verifyRecord(record, commit, readMotionFiles(snapshot));
     fs.writeFileSync(source, rawCatalog);
-    execFileSync(python, [catalogTool, '--projection', projection, '--source-catalog', source, '--output', generated], {
+    execFileSync(python, [catalogTool, '--projection', snapshot, '--source-catalog', source, '--output', generated], {
       stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 16 * 1024 * 1024,
     });
     const catalog = fs.readFileSync(generated);
-    // Check again after the producer reads the files; publish only the original
-    // verified snapshot, not a changed working tree.
-    verifyRecord(record, commit, readMotionFiles(projection));
+    // Check the private snapshot again before consuming its generated catalog.
+    verifyRecord(record, commit, readMotionFiles(snapshot));
     for (const name of [...out.keys()]) {
       if (name.startsWith(MOTION_ROOT + '/')) out.delete(name);
     }

@@ -506,7 +506,7 @@ export function useTimelinePersistence({
       documentSave?: TimelinePersistenceHandoff;
     }) => {
       attemptProvider.setShotTimelineTraceId?.(traceId);
-      const saved: Promise<number | TimelineSaveReceipt> = documentSave ? documentSave.flush() : attemptProvider.saveTimelineAtHead
+      const saved: Promise<number | TimelineSaveReceipt> = documentSave ? documentSave.flush(traceId) : attemptProvider.saveTimelineAtHead
         ? expectedHead
           ? attemptProvider.saveTimelineAtHead(attemptTimelineId, config, expectedHead, registry, bundle)
           : Promise.reject(new TimelineVersionConflictError('Timeline draft has unknown head provenance; resolve or discard it before saving.'))
@@ -762,6 +762,7 @@ export function useTimelinePersistence({
     }
 
     const completedSeqRef = options?.completedSeqRef ?? { current: null };
+    recordTimelineSaveMark(scheduledOrAttempt.traceId, 'attempt-build-start');
     const attempt: SaveAttempt = 'expectedVersion' in scheduledOrAttempt
       ? scheduledOrAttempt
       : {
@@ -778,6 +779,7 @@ export function useTimelinePersistence({
           registry: cloneAttemptValue(scheduledOrAttempt.data.registry),
           stableSignature: scheduledOrAttempt.data.stableSignature,
         };
+    recordTimelineSaveMark(attempt.traceId, 'attempt-build-end');
     let retryScheduled = false;
     if ((scheduledOrAttempt as Partial<ScheduledSave>).refusedAndReverted) return;
 
@@ -789,10 +791,12 @@ export function useTimelinePersistence({
     attempt.session.activeAttempts.add(attempt);
     try {
       // A refused-and-reverted capture is not this attempt's failure.
+      recordTimelineSaveMark(attempt.traceId, 'capture-wait-start');
       await Promise.allSettled([...(attempt.session.captures ?? [])]);
       if (attempt.session.captureFailure) throw attempt.session.captureFailure;
       if ((scheduledOrAttempt as Partial<ScheduledSave>).refusedAndReverted) return;
       await attempt.localCapture;
+      recordTimelineSaveMark(attempt.traceId, 'capture-wait-end');
       await saveMutation.mutateAsync(
         {
           config: attempt.config,
@@ -814,6 +818,7 @@ export function useTimelinePersistence({
               return;
             }
             recordTimelineSaveMark(attempt.traceId, '200');
+            recordTimelineSaveMark(attempt.traceId, 'hook-ack-start');
             const nextVersion = typeof receipt === 'number' ? receipt : receipt.configVersion;
             if (typeof receipt !== 'number') headRevisionRef.current = receipt.head;
             if (typeof receipt === 'number' && nextVersion < configVersionRef.current) {
@@ -873,6 +878,7 @@ export function useTimelinePersistence({
 
             resolveFlushWaiters(attempt, nextVersion);
 
+            recordTimelineSaveMark(attempt.traceId, 'hook-status-update');
             setSaveStatus(attempt.seq >= editSeqRef.current ? 'saved' : 'dirty');
             // Only a receipt that covers the current edit (no newer edit
             // pending) is an ack: an older save's success must NOT clear the
@@ -1102,6 +1108,7 @@ export function useTimelinePersistence({
     const draftRecoveryKey = recoveryMetadata.recoveryKey ?? timelineId;
     const draftBaseVersion = configVersionRef.current;
     const traceId = createShotTimelineTraceId(timelineId);
+    recordTimelineSaveMark(traceId, 'snapshot-start');
     // The editor's admitted source plane owns this mutation, including an
     // explicit empty plane (clear). The loaded envelope supplies only
     // forward-compatible metadata, never an older copy of edited items.
@@ -1120,6 +1127,7 @@ export function useTimelinePersistence({
       bundle: effectiveBundle,
     };
     const draftIdentity = recoveryMetadata.draftIdentity ?? draftOwnerId;
+    recordTimelineSaveMark(traceId, 'snapshot-ready');
     return { session, generation: session.generation, data: nextData, seq,
       draftOwnerId, draftIdentity, draftRecoveryKey, traceId,
       baseHead: head ? cloneAttemptValue(head) : undefined,
@@ -1130,10 +1138,12 @@ export function useTimelinePersistence({
   const writeRecoverySnapshot = useCallback((snapshot: ReturnType<typeof buildRecoverySnapshot>) => {
     const { draft, draftBaseVersion, recoveryMetadata, draftOwnerId, draftIdentity, baseHead: head } = snapshot;
     snapshot.session.recoveryWrites = (snapshot.session.recoveryWrites ?? 0) + 1;
+    if (persistenceEnabled) recordTimelineSaveMark(snapshot.traceId, 'draft-write-queued');
     const draftWrite = (persistenceEnabled
       ? draftWriteChainRef.current
         .catch(() => {})
         .then(() => {
+          recordTimelineSaveMark(snapshot.traceId, 'draft-write-start');
           if (typeof indexedDB === 'undefined') throw new Error('Durable timeline storage is unavailable.');
           const write = (outboxOwnerId?: string) => saveTimelineDraft(timelineId, draft, draftBaseVersion, {
             ...recoveryMetadata,
@@ -1148,7 +1158,10 @@ export function useTimelinePersistence({
           });
           return snapshot.session.localDocumentSave?.writeRecoveryDraft?.(write) ?? write();
         })
-      : Promise.resolve()).then(() => { snapshot.session.storageFailure = undefined; }, (error: unknown) => {
+      : Promise.resolve()).then(() => {
+        if (persistenceEnabled) recordTimelineSaveMark(snapshot.traceId, 'draft-write-ready');
+        snapshot.session.storageFailure = undefined;
+      }, (error: unknown) => {
         snapshot.session.storageFailure = error;
         recordDraftReloadFailure();
         throw error;
@@ -1171,9 +1184,11 @@ export function useTimelinePersistence({
     let localCapture: Promise<void> | undefined;
     if (session.localDocumentSave) {
       try {
+        recordTimelineSaveMark(snapshot.traceId, 'capture-start');
         localCapture = session.localDocumentSave.capture({
           ...snapshot.draft, bundle: snapshot.wireBundle, head: snapshot.baseHead,
         }, gestureBasis);
+        recordTimelineSaveMark(snapshot.traceId, 'capture-returned');
       } catch (error) { localCapture = Promise.reject(error); }
       // An edit can be reverted only to the screen state it was authored on;
       // consume that state so a later unrelated schedule cannot reuse it. The
@@ -1191,7 +1206,10 @@ export function useTimelinePersistence({
         session.captureFailure = error;
         recordDraftReloadFailure();
         throw error;
-      }).finally(() => { captures.delete(localCapture!); });
+      }).finally(() => {
+        captures.delete(localCapture!);
+        recordTimelineSaveMark(snapshot.traceId, 'capture-settled');
+      });
       captures.add(localCapture);
     }
     void localCapture?.catch(() => {});
@@ -1327,8 +1345,10 @@ export function useTimelinePersistence({
     }
 
     recordShotTimelinePhase(scheduledSave.traceId, 'local-commit', { saveDelayMs: SAVE_DEBOUNCE_MS });
+    recordTimelineSaveMark(scheduledSave.traceId, 'debounce-armed');
     saveTimer.current = setTimeout(() => {
       saveTimer.current = null;
+      recordTimelineSaveMark(scheduledSave.traceId, 'debounce-fired');
       recordShotTimelinePhase(scheduledSave.traceId, 'debounce-fired');
       void doSave(scheduledSave);
     }, SAVE_DEBOUNCE_MS);

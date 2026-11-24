@@ -792,7 +792,10 @@ export class RuntimeDataProvider implements DataProvider {
     if (response.receipt === null) {
       throw new TimelineSchemaIncompatibleError('Timeline preview is not an accepted commit');
     }
-    return this.acceptedCommitResult(response, request.timeline_id);
+    recordTimelineSaveMark(traceId, 'accepted-decode-start');
+    const accepted = this.acceptedCommitResult(response, request.timeline_id);
+    recordTimelineSaveMark(traceId, 'accepted-decode-end');
+    return accepted;
   }
 
   /** Build the canonical explicit inverse command, then use the same commit path. */

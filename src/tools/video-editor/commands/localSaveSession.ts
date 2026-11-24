@@ -5,6 +5,7 @@ import { supportsFullV2Commit } from '@/integrations/runtime/contract-metadata.t
 import type { TimelineCommandBasis, TimelineCommitResult } from '../data/DataProvider.ts';
 import { hasOutboxRecoveryDraft } from '../data/timelineDraftIndexedDb.ts';
 import { documentPatchIntent } from './documentPatchIntent.ts';
+import { recordTimelineSaveMark } from '../lib/timeline-save-marks.ts';
 import {
   createCommitOutbox,
   toOutboxJson,
@@ -291,7 +292,8 @@ export async function createLocalSaveSession(options: Options) {
     return true;
   }
 
-  async function pump() {
+  // The optional trace belongs to this flush, never to durable intent bytes.
+  async function pump(traceId?: string) {
     if (sending) return sending;
     if (discarding || changingOwner) return;
     sending = (async () => {
@@ -300,7 +302,9 @@ export async function createLocalSaveSession(options: Options) {
         const at = generation;
         await writes;
         if (closed || !box || writeError) return;
+        recordTimelineSaveMark(traceId, 'outbox-read-start');
         record = await box.read();
+        recordTimelineSaveMark(traceId, 'outbox-read-end');
         if (at !== generation) continue;
         if (await rollback()) return;
         if (closed || writeError || at !== generation) return;
@@ -309,17 +313,22 @@ export async function createLocalSaveSession(options: Options) {
         // queue is empty. Runtime owns suffix revalidation, so the next ORIGINAL intent is sent as stored and never
         // recaptured here; nothing about the send reads the screen. (Plan 63 CC-5b / Plan 18 TL-5 make this exact.)
         if (!record.intents.length && (!record.accepted || record.accepted.intentId !== adoptedAcceptance)) {
+          recordTimelineSaveMark(traceId, 'prepare-display-start');
           const prepared = await options.prepareDisplay(clone(basis));
+          recordTimelineSaveMark(traceId, 'prepare-display-end');
           if (closed || writeError || at !== generation) return;
           displayBasis = clone(basis);
           document = toOutboxJson(prepared.document);
           replaying = false;
+          recordTimelineSaveMark(traceId, 'adopt-start');
           prepared.adopt();
+          recordTimelineSaveMark(traceId, 'adopt-end');
           adoptedAcceptance = record.accepted?.intentId;
         }
         if (closed || writeError || at !== generation) return;
         if (!record.intents.length) {
           replaying = false;
+          recordTimelineSaveMark(traceId, 'local-status-saved');
           publish('saved');
           return;
         }
@@ -332,6 +341,7 @@ export async function createLocalSaveSession(options: Options) {
         publish('saving');
         const acceptedId = record.accepted?.intentId;
         record = await box.dispatch((intent, head) => {
+          recordTimelineSaveMark(traceId, 'request-build-start');
           const original = saveOf(intent.payload);
           const patch = original.documentIntent as Record<string, OutboxJson> | undefined;
           const commands: CommitRequest['commands'] = original.commands ?? [{ schema_version: 1,
@@ -352,15 +362,25 @@ export async function createLocalSaveSession(options: Options) {
           if (original.rationale !== undefined) request.rationale = original.rationale;
           if (original.group_id !== undefined) request.group_id = original.group_id;
           if (fullV2) Object.assign(request, metadata);
-          return { method: 'POST',
+          const built = { method: 'POST' as const,
             path: `/v1/projects/${encodeURIComponent(options.scope.projectId)}/timelines/${encodeURIComponent(options.scope.timelineId)}/commit`,
             body: toOutboxJson(request) };
+          recordTimelineSaveMark(traceId, 'request-build-end');
+          return built;
         }, async (request) => {
+          // dispatch invokes transmit only after its reservation transaction.
+          recordTimelineSaveMark(traceId, 'request-reserved');
           if (closed) return { kind: 'retry', error: { message: 'Editor closed; exact request retained' } };
           try {
-            const result = await options.send(JSON.parse(request.body) as CommitRequest, request.key);
+            recordTimelineSaveMark(traceId, 'request-parse-start');
+            const parsed = JSON.parse(request.body) as CommitRequest;
+            recordTimelineSaveMark(traceId, 'request-parse-end');
+            const result = await options.send(parsed, request.key);
+            recordTimelineSaveMark(traceId, 'accepted-value-start');
             checkBasis({ head: result.accepted, canonicalDocument: result.canonicalDocument });
-            return { kind: 'accepted', head: result.accepted, value: toOutboxJson(result) };
+            const value = toOutboxJson(result);
+            recordTimelineSaveMark(traceId, 'accepted-value-end');
+            return { kind: 'accepted', head: result.accepted, value };
           } catch (error) {
             const kind = error instanceof ApiError && error.status >= 500 ? 'unknown' : classifyRuntimeCommitFailure(error);
             return { kind: kind === 'unknown' || kind === 'storage' ? 'retry' : 'rejected',
@@ -370,6 +390,7 @@ export async function createLocalSaveSession(options: Options) {
         });
         if (closed) return;
         if (record.accepted && record.accepted.intentId !== acceptedId) {
+          recordTimelineSaveMark(traceId, 'accepted-durable');
           const result = record.accepted.value as unknown as TimelineCommitResult;
           basis = { head: result.accepted, canonicalDocument: result.canonicalDocument, graph: result.graph };
           delete state.notice;
@@ -514,12 +535,16 @@ export async function createLocalSaveSession(options: Options) {
     },
     /** Capture synchronously before another local edit; persist every intent before submitting. */
     append: (input: LocalSave) => append(input),
-    async flush() {
+    async flush(traceId?: string) {
       assertOpen();
-      await pump();
+      recordTimelineSaveMark(traceId, 'local-flush-start');
+      await pump(traceId);
       if (writeError) throw writeError;
       if (state.status !== 'saved') throw new Error('Local saves remain unacknowledged; draft retained');
-      return clone(basis);
+      recordTimelineSaveMark(traceId, 'flush-basis-start');
+      const snapshot = clone(basis);
+      recordTimelineSaveMark(traceId, 'flush-basis-end');
+      return snapshot;
     },
     /** Only an explicit 'latest' choice can remove the offered owner and its edits. */
     async discharge(mode: 'latest' | 'keep', exported?: RejectedSaveReceipt, stillCurrent = () => true) {

@@ -80,6 +80,51 @@ function environment() {
 }
 
 describe('local editor saves through the durable outbox', () => {
+  it('attributes one real outbox flush without moving durable settlement or display adoption', async () => {
+    const env = environment();
+    const session = await env.mount();
+    const existing = new Set(performance.getEntriesByType('mark').map((entry) => entry.name));
+    const phases = () => performance.getEntriesByType('mark')
+      .filter((entry) => entry.name.startsWith('astrid.save.') && !existing.has(entry.name))
+      .map((entry) => entry.name.split('.').at(-1));
+    try {
+      await env.append(session, splitSave());
+      env.send.mockImplementationOnce(async () => {
+        expect(phases()).toContain('request-reserved');
+        expect(phases()).not.toContain('accepted-durable');
+        const [stored] = await env.outboxes.list(scope);
+        expect(stored.pending?.request.body).toBeDefined();
+        return result(split);
+      });
+      const prepare = env.prepareDisplay.getMockImplementation()!;
+      env.prepareDisplay.mockImplementationOnce(async (basis, draft) => {
+        expect(phases()).toContain('accepted-durable');
+        const [stored] = await env.outboxes.list(scope);
+        expect(stored.intents).toHaveLength(0);
+        expect(stored.accepted?.head).toEqual(h1);
+        return prepare(basis, draft);
+      });
+
+      await expect(session.flush('private-single-save')).resolves.toMatchObject({ head: h1 });
+      expect(phases()).toEqual([
+        'local-flush-start', 'outbox-read-start', 'outbox-read-end',
+        'request-build-start', 'request-build-end', 'request-reserved',
+        'request-parse-start', 'request-parse-end', 'accepted-value-start',
+        'accepted-value-end', 'accepted-durable', 'prepare-display-start',
+        'prepare-display-end', 'adopt-start', 'adopt-end', 'local-status-saved',
+        'flush-basis-start', 'flush-basis-end',
+      ]);
+      expect(env.adopted).toEqual([split]);
+      expect(session.getState().status).toBe('saved');
+      expect(env.send).toHaveBeenCalledOnce();
+    } finally {
+      await session.dispose();
+      for (const entry of performance.getEntriesByType('mark')) {
+        if (entry.name.startsWith('astrid.save.') && !existing.has(entry.name)) performance.clearMarks(entry.name);
+      }
+    }
+  });
+
   it('retains encoded physical-root guards, step identity and dependent created IDs through recovery without inventing a request', async () => {
     const env = environment();
     const first = await env.mountCanonical();

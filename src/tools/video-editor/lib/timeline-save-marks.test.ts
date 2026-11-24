@@ -27,6 +27,27 @@ describe('timeline save timing marks', () => {
     expect(marks.every(({ name }) => !name.includes(privateTraceId))).toBe(true);
   });
 
+  it('keeps early attribution private, first-occurrence only, and out of badge selection until a milestone', () => {
+    recordTimelineSaveMark(undefined, 'capture-start');
+    recordTimelineSaveMark('measured-save-private', 'snapshot-start');
+    recordTimelineSaveMark('measured-save-private', 'snapshot-start');
+    recordTimelineSaveMark('measured-save-private', 'gesture-end');
+    recordTimelineSaveMark('measured-save-private', 'post-sent');
+    recordTimelineSaveMark('measured-save-private', '200');
+    recordTimelineSaveMark('unrelated-capture-private', 'capture-start');
+    recordLatestTimelineSavedBadgeMark();
+
+    const marks = performance.getEntriesByType('mark').filter((entry) => entry.name.startsWith(PREFIX));
+    const measured = marks.find((entry) => entry.name.endsWith('.snapshot-start'))!;
+    const correlation = measured.name.split('.')[2];
+    expect(marks.filter((entry) => entry.name.startsWith(`${PREFIX}${correlation}.`))
+      .map((entry) => entry.name.split('.').at(-1))).toEqual([
+      'snapshot-start', 'gesture-end', 'post-sent', '200', 'saved-badge',
+    ]);
+    expect(marks.filter((entry) => entry.name.endsWith('.capture-start'))).toHaveLength(1);
+    expect(marks.every((entry) => /^astrid\.save\.\d+\.[a-z0-9-]+$/.test(entry.name))).toBe(true);
+  });
+
   it('retains at most sixteen save correlations', () => {
     let firstCorrelation = '';
     for (let index = 0; index < 17; index += 1) {

@@ -12,6 +12,7 @@ import { findEnclosingPinnedGroup } from '../lib/pinned-group-projection.ts';
 import { withDefaultTimelineOutput } from '../lib/defaults.ts';
 import { materializeAuthoredOutput } from '../lib/timeline-data.ts';
 import { markTimelineSaveRejection, type TimelineSaveRejectionCode } from '../lib/timeline-diagnostics.ts';
+import { recordTimelineSaveMark } from '../lib/timeline-save-marks.ts';
 import { applyTimelineOperation, type TimelineElementOperation } from '../runtime/element-adapter.ts';
 import type { AstridAgentElementContext } from '../runtime/element-contract.ts';
 import { documentPatchIntent } from '../commands/documentPatchIntent.ts';
@@ -35,7 +36,8 @@ export type TimelineGestureReadBasis = {
 /** Assembly supplies the ORIGINAL verified read, not loadTimelineCommandBasis at save time. */
 export interface TimelineLocalSaveHandoff {
   capture(source: TimelineSaveSource, gestureBasis?: TimelineGestureReadBasis): Promise<void>;
-  flush(): Promise<TimelineSaveReceipt>;
+  /** Optional in-memory correlation for save latency diagnostics only. */
+  flush(traceId?: string): Promise<TimelineSaveReceipt>;
   /** The durable local save session's state, when the owner has one. */
   status?(): string | undefined;
   ownerId?(): string | undefined;
@@ -1031,23 +1033,29 @@ export function createTimelineLocalSaveHandoff(options: {
         return Promise.reject(rejection);
       }
     },
-    async flush() {
+    async flush(traceId) {
       historyEpoch++;
       try {
-        const basis = await options.session.flush();
+        recordTimelineSaveMark(traceId, 'handoff-flush-start');
+        const basis = await options.session.flush(traceId);
+        recordTimelineSaveMark(traceId, 'handoff-adopted-read-start');
         const adopted = options.adopted(basis);
+        recordTimelineSaveMark(traceId, 'handoff-adopted-read-end');
         const head = adopted.receipt.head;
         if (head.projectId !== initial.canonicalDocument.project_id || head.timelineId !== initial.canonicalDocument.timeline_id
           || head.headRevisionId !== basis.head.revisionId || head.headPublicationId !== basis.head.publicationId
           || !same(adopted.source.head, head)) refuse('canonical assembly did not adopt the accepted head');
+        recordTimelineSaveMark(traceId, 'handoff-copy-start');
         initial = structuredClone(basis);
         source = structuredClone(adopted.source);
         authoringSource = structuredClone(adopted.source);
         document = structuredClone(basis.canonicalDocument);
+        recordTimelineSaveMark(traceId, 'handoff-copy-end');
         sourceChecked = false;
         targets = historyTargets(basis.history, basis.head, options.session.actorId);
         historyLoaded = completeHistory(basis.history, basis.head);
         if (legacyHistory && options.loadHistory) await refreshHistory();
+        recordTimelineSaveMark(traceId, 'handoff-flush-end');
         return adopted.receipt;
       }
       catch (error) {

@@ -25,7 +25,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.resolve(here, '../..');
 const root = process.env.SAVE_LOOP_ROOT;
 const baseUrl = process.env.SAVE_LOOP_BASE_URL;
-const {variant, clipCount: clipTarget, mediaSize, prepareMedia, omitAmbiguousAnchors} = parseFixtureOptions(process.argv.slice(2), process.env);
+const {variant, clipCount: clipTarget, mediaSize, prepareMedia, omitAmbiguousAnchors, contentExtent} = parseFixtureOptions(process.argv.slice(2), process.env);
 const largeShots = variant === 'large-shots';
 const startedAt = Date.now();
 const scratch = path.resolve(process.env.SAVE_LOOP_SCRATCH || `${repo}.env/save-loop`);
@@ -701,7 +701,7 @@ async function buildFilm({resolvedRoot, ports, shape}) {
 }
 
 async function main() {
-  const shape = variant === 'film-shaped' ? filmFixtureShape(clipTarget) : null;
+  const shape = variant === 'film-shaped' ? filmFixtureShape(clipTarget, {contentExtent}) : null;
   if (variant === 'film-shaped' && prepareMedia) {
     fs.mkdirSync(scratch, {recursive: true});
     assertDisk();

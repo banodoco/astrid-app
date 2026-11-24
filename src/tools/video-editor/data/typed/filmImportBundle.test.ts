@@ -19,7 +19,11 @@ describe('film-import config.bundle', () => {
     const { publication } = prepareFilmImport(options(23));
     const parent = publication.parent_composition;
     const bundle = parseTimelineBundle(parent.config.bundle);
-    expect(bundle.transcriptReferences?.associations).toEqual([{ assetId: 'audio', documentId: 'transcript' }]);
+    // Both identities: assetId/documentId for the editor, mediaId/sourceId for the Agent. The optional
+    // keys parse only with astrid-app PR #392 (release/15/transcript-refs-schema).
+    expect(bundle.transcriptReferences?.associations).toEqual([
+      { assetId: 'audio', documentId: 'transcript', mediaId: content.media_id, sourceId: content.source_id },
+    ]);
     expect(parent.registry.assets.audio.media_id).toBe(content.media_id);
   });
   it('omits the bundle when no legacy word is declared', () => {

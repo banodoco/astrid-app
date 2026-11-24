@@ -59,6 +59,29 @@ declarations while retaining their footage clips and the repeated transcript
 words. The measurement reports the two unique resolved targets and the number
 of intentionally omitted declarations.
 
+Extents. The manifest's `measurements` report two numbers separately:
+`content_extent_seconds` is the end of the last clip (what a render covers) and
+`occurrence_extent_seconds` is the end of the last parent occurrence (about
+195.967 for the default 23-clip build). The existing `duration_seconds` key is the
+occurrence extent: by default the fixture is not a 196 s film, because the second
+shot's first four children are deliberately short (0.1 s anchor targets) and the
+content ends far earlier (18 s for 23 clips). Add `--content-extent` (default off,
+`film-shaped` only) to give those children their real extent (occurrence length
+minus offset), so the content runs the full length; narration and its transcript
+still end together at the clip extent and the word anchors stay unique. The default
+output is unchanged without the option.
+
+After the build, the builder reads back the accepted head and exits non-zero with
+`accepted head does not match the planned fixture: ...` if the shot count, child
+clip count, parent clip count or either extent differs from the plan. It does not
+compare individual holds, so the short default children pass.
+
+Requirements: Agent main 514499de or later (plan-88 retained-transcript
+hydration). The parent `config.bundle` carries the editor's `TimelineBundle`
+envelope and association rows `{assetId, documentId, mediaId, sourceId}`; the
+editor accepts the optional `mediaId`/`sourceId` keys only with astrid-app PR #392
+(`release/15/transcript-refs-schema`).
+
 The resulting manifest records the accepted Runtime head and generated media. The
 fixture imports two distinct images and two distinct videos for same-kind overlay
 swaps, and verifies their accepted identities and metadata.

@@ -85,6 +85,13 @@ export function prepareFilmFootage({timelineId, shape, selections, legacyWord, n
         row.app = {astrid: {on: `"${legacyWord.text}"`, for: child.hold}};
       }
       if (shape.ripple && shot.index === 1 && child.index >= 2 && row.at < 0.7) row.at = 0.7;
+      // --content-extent: the narration-shot children keep their real extent (occurrence length
+      // minus offset) instead of the short 0.1 s anchor-only holds. Only the hold changes, so word
+      // anchors stay unique; an anchor's 'for' tracks the hold like any other anchored child.
+      if (shape.contentExtent && narration && shot.index === narrationShot && child.index < 4) {
+        row.hold = row.to = Math.floor((Math.round(shot.duration * 1000) / 1000 - row.at) * 1000) / 1000;
+        if (row.app?.astrid?.for !== undefined) row.app.astrid.for = row.hold;
+      }
       if (shape.ripple && narration && shot.index === 0 && (child.index === 2 || child.index === 3)) {
         row.at = child.index === 2 ? 0 : 1 / 30; row.hold = row.to = 3 / 30;
         if (!omitAmbiguousAnchors) row.app = {astrid: {on: '"repeat"', for: row.hold}};
@@ -153,6 +160,12 @@ export function prepareFilmFootage({timelineId, shape, selections, legacyWord, n
       at: shape.shots[overlay.shotIndex].on + row.at, hold: row.hold, from: 0, to: row.hold, speed: 1,
       entrance: {type: 'fade', duration: 0.2, params: {easing: n ? 'in' : 'out'}}};
   });
+  // The editor resolves a transcript association (assetId) through the parent registry, so the
+  // asset carrying the legacy transcript's media must be registered there.
+  const wordSource = legacyWord && (narration?.selection?.object_id === legacyWord.content.media_id ? narration.selection :
+    selections.find(pin => pin.object_id === legacyWord.content.media_id));
+  if (wordSource && !parentAssets[wordSource.asset])
+    parentAssets[wordSource.asset] = binding(wordSource, wordSource === narration?.selection ? 'audio' : 'video');
   return {internal, shots, occurrences, clips, parentAssets, used};
 }
 
@@ -179,8 +192,20 @@ export function prepareFilmImport({projectId, timelineId, shape, selections, leg
   }
   const tracks = ['V1', 'V2', 'V3', 'V4', 'V5', 'V6'].map(id => ({id, kind: 'visual', label: id}));
   const config = {output: {resolution: `${mediaSize.width}x${mediaSize.height}`, fps: 30, file: 'output.mp4'}, clips, tracks};
-  if (legacyWord) config.bundle = {transcriptReferences: {schema: 'media.transcript.references/v1',
-    associations: [{documentId: legacyWord.documentId, mediaId: legacyWord.content.media_id, sourceId: legacyWord.content.source_id}]}};
+  // config.bundle carries BOTH identities. The editor (dataProvider loadTimeline ->
+  // parseTimelineBundle) needs the full TimelineBundle envelope (schema_version 1,
+  // itemsBySchemaRef) and assetId+documentId per row; the Agent (astrid/sdk/timeline/words.py)
+  // reads mediaId/sourceId, which pin the non-default source. The editor accepts the optional
+  // mediaId/sourceId keys only with astrid-app PR #392 (release/15/transcript-refs-schema).
+  if (legacyWord) {
+    const mediaId = legacyWord.content.media_id;
+    const source = narration?.selection?.object_id === mediaId ? narration.selection : selections.find(pin => pin.object_id === mediaId);
+    if (!source) throw new Error('legacy word media is not among the selected media');
+    if (!parentAssets[source.asset]) throw new Error('legacy word media is missing from the parent registry');
+    config.bundle = {schema_version: 1, itemsBySchemaRef: {}, transcriptReferences: {schema: 'media.transcript.references/v1',
+      associations: [{assetId: source.asset, documentId: legacyWord.documentId,
+      mediaId: mediaId, sourceId: legacyWord.content.source_id}]}};
+  }
   const parent = {config, registry: {assets: parentAssets}, clips, tracks, occurrences};
   const publication = {project_id: projectId, timeline_id: timelineId, expected_head: null,
     parent_revision_id: id('parent-rev'), content_digest: revisionDigest(parent), parent_composition: parent,
@@ -192,4 +217,24 @@ export function prepareFilmImport({projectId, timelineId, shape, selections, leg
   const transcripts = legacyWord ? [{document_id: legacyWord.documentId, kind: 'media.transcript', content: legacyWord.content}] : [];
   return {timeline_id: timelineId, name, publication, transcripts, text_bindings: [],
     differences: {missing_effects: [], different_effects: []}};
+}
+
+// Pure planning summary of a prepared import: what the builder expects the accepted head to show.
+// content_extent_seconds is the end of the last clip (what a render covers); occurrence_extent_seconds
+// is the end of the last parent occurrence. Shot clips are offset by their occurrence start.
+export function planFilmImport(prepared) {
+  const {parent_composition: parent, internal_timeline_revisions: internal, shot_revisions: shots} = prepared.publication;
+  const byRevision = new Map(internal.map(row => [row.revision_id, row.payload]));
+  const shotRows = new Map(shots.map(row => [row.revision_id, row]));
+  let content = Math.max(0, ...parent.clips.map(row => row.at + row.hold)), occurrence = 0, children = 0;
+  for (const occ of parent.occurrences) {
+    const start = occ.placement.start_ms / 1000;
+    occurrence = Math.max(occurrence, start + occ.duration_ms / 1000);
+    const clips = byRevision.get(shotRows.get(occ.shot_revision_id).internal_timeline_revision_id).clips;
+    children += clips.length;
+    for (const row of clips) content = Math.max(content, start + row.at + row.hold);
+  }
+  const round = value => Math.round(value * 1000) / 1000;
+  return {shots: parent.occurrences.length, child_clips: children, parent_clips: parent.clips.length,
+    content_extent_seconds: round(content), occurrence_extent_seconds: round(occurrence)};
 }

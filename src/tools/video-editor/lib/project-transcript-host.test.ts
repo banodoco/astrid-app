@@ -26,6 +26,82 @@ import {
   type ProjectTranscriptContent,
 } from "../data/typed/projectTranscript.ts";
 import type { TimelineConfig } from "../types/index.ts";
+describe("transcript reference optional ids across a save rewrite", () => {
+  const refs = (associations: object[]) => ({
+    schema: "media.transcript.references/v1" as const,
+    associations: associations as never,
+  });
+  it("keeps mediaId/sourceId on a re-selected row and other rows, and does not invent them", async () => {
+    const { r } = repository(),
+      a = await editor(r),
+      receipt = await a.host.importTranscript({
+        document: handoff,
+        associationAssetId: "alias",
+      }),
+      id = docId(receipt);
+    a.dataRef.current = {
+      ...a.dataRef.current,
+      transcriptReferences: refs([
+        { assetId: "alias", documentId: id, mediaId: media, sourceId: "default" },
+        { assetId: "other", documentId: "doc-other", mediaId: "m2", sourceId: "s2" },
+        { assetId: "plain", documentId: "doc-plain" },
+      ]),
+    };
+    await a.host.selectProjectSource({ assetId: "alias", documentId: id });
+    const rows = a.dataRef.current.transcriptReferences!.associations;
+    expect(rows.find((x) => x.assetId === "alias")).toEqual({
+      assetId: "alias", documentId: id, mediaId: media, sourceId: "default",
+    });
+    expect(rows.find((x) => x.assetId === "other")).toEqual({
+      assetId: "other", documentId: "doc-other", mediaId: "m2", sourceId: "s2",
+    });
+    expect(rows.find((x) => x.assetId === "plain")).toEqual({
+      assetId: "plain", documentId: "doc-plain",
+    });
+    expect(() => parseTimelineBundle({
+      schema_version: 1,
+      itemsBySchemaRef: {},
+      transcriptReferences: a.dataRef.current.transcriptReferences,
+    })).not.toThrow();
+  });
+  it("refreshes mediaId/sourceId to the new document when a different document is selected", async () => {
+    const { r } = repository(),
+      a = await editor(r),
+      first = docId(await a.host.importTranscript({ document: handoff, associationAssetId: "alias" })),
+      second = docId(await a.host.importTranscript({
+        document: { ...handoff, source_id: "second" } as never,
+        associationAssetId: "alias",
+      }));
+    a.dataRef.current = {
+      ...a.dataRef.current,
+      transcriptReferences: refs([
+        { assetId: "alias", documentId: first, mediaId: media, sourceId: "default" },
+      ]),
+    };
+    await a.host.selectProjectSource({ assetId: "alias", documentId: second });
+    const row = a.dataRef.current.transcriptReferences!.associations[0];
+    const doc = await r.get(second);
+    expect(row).toEqual({
+      assetId: "alias",
+      documentId: second,
+      mediaId: doc.content.media_id,
+      sourceId: doc.content.source_id,
+    });
+  });
+  it("does not invent ids on a re-selected row that had none", async () => {
+    const { r } = repository(),
+      a = await editor(r),
+      receipt = await a.host.importTranscript({
+        document: handoff,
+        associationAssetId: "alias",
+      }),
+      id = docId(receipt);
+    await a.host.selectProjectSource({ assetId: "alias", documentId: id });
+    expect(a.dataRef.current.transcriptReferences!.associations).toEqual([
+      { assetId: "alias", documentId: id },
+    ]);
+  });
+});
 const media = "sha256:" + "a".repeat(64);
 const hosts: ProjectTranscriptHost[] = [];
 const config: TimelineConfig = {

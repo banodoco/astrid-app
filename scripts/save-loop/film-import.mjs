@@ -153,6 +153,12 @@ export function prepareFilmFootage({timelineId, shape, selections, legacyWord, n
       at: shape.shots[overlay.shotIndex].on + row.at, hold: row.hold, from: 0, to: row.hold, speed: 1,
       entrance: {type: 'fade', duration: 0.2, params: {easing: n ? 'in' : 'out'}}};
   });
+  // The editor resolves a transcript association (assetId) through the parent registry, so the
+  // asset carrying the legacy transcript's media must be registered there.
+  const wordSource = legacyWord && (narration?.selection?.object_id === legacyWord.content.media_id ? narration.selection :
+    selections.find(pin => pin.object_id === legacyWord.content.media_id));
+  if (wordSource && !parentAssets[wordSource.asset])
+    parentAssets[wordSource.asset] = binding(wordSource, wordSource === narration?.selection ? 'audio' : 'video');
   return {internal, shots, occurrences, clips, parentAssets, used};
 }
 
@@ -179,8 +185,17 @@ export function prepareFilmImport({projectId, timelineId, shape, selections, leg
   }
   const tracks = ['V1', 'V2', 'V3', 'V4', 'V5', 'V6'].map(id => ({id, kind: 'visual', label: id}));
   const config = {output: {resolution: `${mediaSize.width}x${mediaSize.height}`, fps: 30, file: 'output.mp4'}, clips, tracks};
-  if (legacyWord) config.bundle = {transcriptReferences: {schema: 'media.transcript.references/v1',
-    associations: [{documentId: legacyWord.documentId, mediaId: legacyWord.content.media_id, sourceId: legacyWord.content.source_id}]}};
+  // The editor (dataProvider loadTimeline -> parseTimelineBundle) parses config.bundle as a full
+  // TimelineBundle envelope: schema_version 1, itemsBySchemaRef, and strict {assetId, documentId}
+  // associations (unknown keys such as the Agent CLI's mediaId/sourceId are rejected).
+  if (legacyWord) {
+    const mediaId = legacyWord.content.media_id;
+    const source = narration?.selection?.object_id === mediaId ? narration.selection : selections.find(pin => pin.object_id === mediaId);
+    if (!source) throw new Error('legacy word media is not among the selected media');
+    if (!parentAssets[source.asset]) throw new Error('legacy word media is missing from the parent registry');
+    config.bundle = {schema_version: 1, itemsBySchemaRef: {}, transcriptReferences: {schema: 'media.transcript.references/v1',
+      associations: [{assetId: source.asset, documentId: legacyWord.documentId}]}};
+  }
   const parent = {config, registry: {assets: parentAssets}, clips, tracks, occurrences};
   const publication = {project_id: projectId, timeline_id: timelineId, expected_head: null,
     parent_revision_id: id('parent-rev'), content_digest: revisionDigest(parent), parent_composition: parent,

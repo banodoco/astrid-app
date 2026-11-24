@@ -90,4 +90,21 @@ describe('App build info', () => {
     });
   });
 
+  it('captures the actual motion-pack upstream in the production build define', () => {
+    const vendorRoot = path.resolve(__dirname, '../../vendor/astrid-browser');
+    const directory = mkdtempSync(path.join(tmpdir(), 'astrid-motion-provenance-'));
+    const manifestPath = path.join(directory, 'manifest.json');
+    const { astrid_commit: commit } = JSON.parse(readFileSync(path.join(vendorRoot, 'provenance.json'), 'utf8'));
+    try {
+      writeFileSync(manifestPath, '{}');
+      const plugin = createAppBuildPlugin({ appBuild: 'app', manifestPath, selectedCheckout: vendorRoot, vendorRoot });
+      const config = plugin.config?.({} as never, { command: 'build', mode: 'production' } as never) as { define: Record<string, string> };
+      const revisions = JSON.parse(config.define.__ASTRID_EDITOR_PACK_REVISIONS__);
+      expect(commit).toMatch(/^[0-9a-f]{40}$/);
+      expect(revisions.astrid_motion).toBe(commit);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
 });

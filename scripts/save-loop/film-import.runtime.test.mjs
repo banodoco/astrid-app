@@ -2,11 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
+import {declaredSkip} from '../quality/declared-skip.mjs';
 import {filmShape} from './film-shape.mjs';
 
 // Opt in only with a Python that already has the pinned Runtime installed.
 // This exercises import acceptance in a disposable embedded realm, not render.
-test('Runtime accepts the prepared historical closure', {skip: !process.env.SAVE_LOOP_TEST_PYTHON}, () => {
+test('Runtime accepts the prepared historical closure', {skip: declaredSkip('save-loop-runtime-python')}, () => {
   const sources = ['generated-fixture-a', 'generated-fixture-b', 'generated-fixture-c'];
   const pins = sources.map((source, i) => ({asset: `asset-${i}`, generation_id: `generation-${i}`,
     variant_id: `variant-${i}`, object_id: `sha256:${createHash('sha256').update(source).digest('hex')}`}));

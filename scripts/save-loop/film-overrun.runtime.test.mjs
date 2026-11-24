@@ -2,11 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
+import {declaredSkip} from '../quality/declared-skip.mjs';
 import {filmShape} from './film-shape.mjs';
 
 // The imported closure is real; candidate edits below exercise the TE-2
 // validator directly, not a Runtime commit or render.
-test('imported legacy overrun allows only non-worsening start shifts', {skip: !process.env.SAVE_LOOP_TEST_PYTHON}, () => {
+test('imported legacy overrun allows only non-worsening start shifts', {skip: declaredSkip('save-loop-runtime-python')}, () => {
   const sources = ['generated-fixture-a', 'generated-fixture-b', 'generated-fixture-c'];
   const pins = sources.map((source, i) => ({asset: `asset-${i}`, generation_id: `generation-${i}`,
     variant_id: `variant-${i}`, object_id: `sha256:${createHash('sha256').update(source).digest('hex')}`}));

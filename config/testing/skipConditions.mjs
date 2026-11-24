@@ -126,3 +126,6 @@ export function pwshUnavailableReason() {
 
 export const isWindows = () => process.platform === 'win32';
 export const macosLockfMissing = () => process.platform !== 'darwin' || !existsSync('/usr/bin/lockf');
+
+/** Why the save-loop Runtime import tests cannot run (no SAVE_LOOP_TEST_PYTHON: a Python with the pinned Runtime installed), or false. */
+export const saveLoopPythonUnset = () => !process.env.SAVE_LOOP_TEST_PYTHON;

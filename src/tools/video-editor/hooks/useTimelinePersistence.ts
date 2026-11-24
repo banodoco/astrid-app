@@ -35,6 +35,7 @@ import {
   saveTimelineDraft,
 } from '@/tools/video-editor/data/timelineDraftIndexedDb.ts';
 import { recordShotTimelinePhase } from '@/tools/video-editor/lib/shot-timeline-timing.ts';
+import { recordTimelineSaveMark } from '@/tools/video-editor/lib/timeline-save-marks.ts';
 import { canonicalJsonStringify, type TimelineBundleEnvelope } from '@/tools/video-editor/data/typed/timelineBundle.ts';
 import type { AssetRegistry, TimelineConfig } from '@/tools/video-editor/types/index.ts';
 import type { CommitDataOptions, ScheduleSaveFn } from '@/tools/video-editor/hooks/useTimelineCommit.ts';
@@ -812,6 +813,7 @@ export function useTimelinePersistence({
             ) {
               return;
             }
+            recordTimelineSaveMark(attempt.traceId, '200');
             const nextVersion = typeof receipt === 'number' ? receipt : receipt.configVersion;
             if (typeof receipt !== 'number') headRevisionRef.current = receipt.head;
             if (typeof receipt === 'number' && nextVersion < configVersionRef.current) {
@@ -1030,6 +1032,7 @@ export function useTimelinePersistence({
         failSave(error instanceof Error ? error.message : String(error));
       }
     } finally {
+      attempt.provider.setShotTimelineTraceId?.(null);
       attempt.session.activeAttempts.delete(attempt);
       if (!options?.bypassQueue) {
         isSavingRef.current = false;
@@ -1650,6 +1653,7 @@ export function useTimelinePersistence({
       if (!deferred) {
         return;
       }
+      recordTimelineSaveMark(deferred.save.traceId, 'gesture-end');
       deferredSaveRef.current = null;
       scheduleSaveWithCapture(deferred.save.data, { preserveStatus: deferred.preserveStatus }, deferred.save);
     });

@@ -48,11 +48,13 @@ if (!['localhost','127.0.0.1','[::1]'].includes(origin.hostname)) throw new Erro
 const sweepLimit = sweepMaxMs();
 let browser, closePromise, activeRow;
 let stopped = false;
+let signalExitCode;
 let provisionalSeen=false, probePromise;
 const record = value => fs.appendFileSync(resultsPath, JSON.stringify(value)+'\n');
 const closeBrowser = () => closePromise ??= withBound('browser-close', CLOSE_BOUND_MS, () => browser?.close());
 for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]]) {
   process.once(signal, async () => {
+    signalExitCode = code;
     stopped = true;
     if (activeRow) activeRow.capture.cancelled = true;
     try { await closeBrowser(); } finally { process.exit(code); }
@@ -249,7 +251,10 @@ try {
   } finally {
     // Promise.race cannot cancel an in-flight page call. Never let abandoned
     // Playwright requests or probe promises keep this aborted CLI alive.
-    process.exit(1);
+    process.exit(signalExitCode ?? 1);
   }
+}
+if (signalExitCode !== undefined) {
+  try { await closeBrowser(); } finally { process.exit(signalExitCode); }
 }
 process.exit(failed ? 1 : 0);

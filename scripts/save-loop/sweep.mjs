@@ -230,6 +230,10 @@ try {
     if (reducedOpening && !provisionalSeen) record({type:'post_open_blocked', post_open_blocked_s:null, attempts:0, outcome:'missing_ui_marker'});
     await closeBrowser();
     if (probePromise) await probePromise.catch(()=>{});
+    console.table(rows.map(row => ({scenario:row.name, run:row.iteration, pass:row.pass, ms:row.ms, reason:row.reason || row.error})));
+    // Drain the terminal output within the same whole-sweep bound. The CLI
+    // must exit even if Playwright left a non-awaited handle behind.
+    await Promise.all([process.stdout, process.stderr].map(stream => new Promise(resolve => stream.write('', resolve))));
   });
 } catch (error) {
   stopped = true;
@@ -248,5 +252,4 @@ try {
     process.exit(1);
   }
 }
-console.table(rows.map(row => ({scenario:row.name, run:row.iteration, pass:row.pass, ms:row.ms, reason:row.reason || row.error})));
-if (failed) process.exitCode = 1;
+process.exit(failed ? 1 : 0);

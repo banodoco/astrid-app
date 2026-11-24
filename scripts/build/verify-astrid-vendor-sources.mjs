@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { verifyMotionProjection } from '../astrid-landing/motion-projection.mjs';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const closureRoot = path.join(projectRoot, 'vendor/astrid-build-inputs');
@@ -51,6 +52,8 @@ process.stdout.write(`Verified ${checked} pinned Astrid source files.\n`);
 const browserRoot = path.join(projectRoot, 'vendor/astrid-browser');
 const provenance = JSON.parse(await readFile(path.join(browserRoot, 'provenance.json'), 'utf8'));
 if (!/^[0-9a-f]{40}$/.test(provenance.astrid_commit ?? '')) throw new Error('vendor/astrid-browser provenance lacks astrid_commit');
+const motionDigest = verifyMotionProjection(browserRoot, provenance);
+if (motionDigest) process.stdout.write(`Verified motion projection ${motionDigest}.\n`);
 const recorded = Object.entries(provenance.files ?? {});
 if (recorded.length === 0) throw new Error('vendor/astrid-browser provenance lists no files');
 for (const [relative, expected] of recorded) {

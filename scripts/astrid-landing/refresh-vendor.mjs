@@ -7,6 +7,8 @@
  *
  * Options: --destination <dir>   default vendor/astrid-browser
  *          --files <json>        default config/astrid-vendor-files.json (the declared file set)
+ *          --motion-projection <dir>  verified output of the Agent projection tool
+ *          --motion-tool-repo <dir>   Agent checkout containing RN-5b-min tools
  *
  * It reads the declared file set straight from git objects at the commit (the
  * Astrid checkout is never modified), keeps Astrid-relative paths, derives
@@ -24,6 +26,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { applyMotionProjection, MOTION_ROOT } from './motion-projection.mjs';
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const args = Object.fromEntries(
@@ -60,7 +63,12 @@ const out = new Map(); // destination-relative path -> Buffer
 const add = (p, bytes) => out.set(p, bytes);
 
 add('LICENSE', blob(declared.license));
+const includesMotion = declared.directories.some(dir => dir.path.startsWith(MOTION_ROOT + '/'));
+if (includesMotion && (!args['motion-projection'] || !args['motion-tool-repo'])) {
+  throw new Error('Motion vendoring requires --motion-projection and --motion-tool-repo; never vendor the raw upstream pack');
+}
 for (const dir of declared.directories) {
+  if (includesMotion && dir.path.startsWith(MOTION_ROOT + '/')) continue;
   const matches = allPaths.filter((p) => p.startsWith(`${dir.path}/`) && dir.extensions.includes(path.extname(p)) && !excluded.has(p));
   if (!matches.length) throw new Error(`No ${dir.extensions.join('/')} files under ${dir.path} in ${commit}`);
   for (const p of matches) add(p, blob(p));
@@ -82,9 +90,13 @@ for (const tool of JSON.parse(toolCatalogBytes.toString('utf8')).tools) {
   }
 }
 
-// public-catalog.ts = the commit's catalog.ts filtered to the declared selections, in selection order.
+const motionProjection = includesMotion ? applyMotionProjection(
+  out, commit, path.resolve(args['motion-projection']), path.resolve(args['motion-tool-repo']),
+) : undefined;
+
+// public-catalog.ts = the generated catalog filtered to the declared selections, in selection order.
 const { output, source, selections } = declared.public_catalog;
-const sourceText = blob(source).toString('utf8');
+const sourceText = (out.get(source) ?? blob(source)).toString('utf8');
 const open = 'Object.freeze(\n';
 const start = sourceText.indexOf(open) + open.length;
 const end = sourceText.indexOf('\n);\n', start);
@@ -104,7 +116,8 @@ const resolves = (from, spec) => {
 };
 const unresolved = [];
 for (const [p, bytes] of out) {
-  if (!/\.tsx?$/.test(p)) continue;
+  // The full pack includes authoring-only preview examples, not browser module inputs.
+  if (!/\.tsx?$/.test(p) || p.startsWith(MOTION_ROOT + '/preview/')) continue;
   for (const m of bytes.toString('utf8').matchAll(/(?:from|import\()\s*['"](\.{1,2}\/[^'"]+)['"]/g)) {
     if (!resolves(p, m[1])) unresolved.push(`${p} -> ${m[1]}`);
   }
@@ -126,7 +139,8 @@ for (const p of [...out.keys()].sort()) {
 const provenance = {
   astrid_commit: commit,
   astrid_tree: tree,
-  refresh_command: `node scripts/astrid-landing/refresh-vendor.mjs --astrid-repo <Astrid checkout> --commit ${commit}`,
+  refresh_command: `node scripts/astrid-landing/refresh-vendor.mjs --astrid-repo <Astrid checkout> --commit ${commit}${motionProjection ? ' --motion-projection <verified pack> --motion-tool-repo <Agent checkout>' : ''}`,
+  ...(motionProjection ? { motion_projection: motionProjection } : {}),
   declared_files: path.relative(appRoot, declaredPath),
   excluded_files: [...excluded].sort(),
   verify_command: 'node scripts/build/verify-astrid-vendor-sources.mjs',

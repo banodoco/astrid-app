@@ -13,6 +13,8 @@
  * Results are appended; choose a new file for each round.
  */
 import fs from 'fs';
+import {createRowMarkCapture, recordThrownRow, rowBoundMs, sweepMaxMs, withBound,
+  SweepBoundError, CLEANUP_BOUND_MS, CLOSE_BOUND_MS, finishAbortedSweep} from './save-marks.mjs';
 
 const usage = 'Usage: node scripts/save-loop/sweep.mjs --manifest FILE --results FILE --versions FILE [--broken-probe|--broken-probe-only] [--reduced-opening]';
 const args = process.argv.slice(2);
@@ -43,24 +45,31 @@ process.env.SAVE_LOOP_TIMELINE = fixture.timeline_id;
 const baseUrl = process.env.SAVE_LOOP_BASE_URL;
 const origin = new URL(baseUrl);
 if (!['localhost','127.0.0.1','[::1]'].includes(origin.hostname)) throw new Error('save-loop requires a local isolated stack');
-const helpers = await import('./lib.mjs');
-const {createRecorder, publicSnapshot} = await import('./assert.mjs');
-const {expectedFixtureIds, sameIds} = await import('./readiness.mjs');
-let browser;
+const sweepLimit = sweepMaxMs();
+let browser, closePromise, activeRow;
+let stopped = false;
 let provisionalSeen=false, probePromise;
 const record = value => fs.appendFileSync(resultsPath, JSON.stringify(value)+'\n');
-const round4 = reducedOpening ? await import('./round4.mjs') : null;
+const closeBrowser = () => closePromise ??= withBound('browser-close', CLOSE_BOUND_MS, () => browser?.close());
 for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]]) {
   process.once(signal, async () => {
-    try { if (browser) await browser.close(); } finally { process.exit(code); }
+    stopped = true;
+    if (activeRow) activeRow.capture.cancelled = true;
+    try { await closeBrowser(); } finally { process.exit(code); }
   });
 }
 let failed = false;
 const rows = [];
-try {
+async function runSweep() {
+  const helpers = await import('./lib.mjs');
+  const {createRecorder, publicSnapshot} = await import('./assert.mjs');
+  const {expectedFixtureIds, sameIds} = await import('./readiness.mjs');
+  const round4 = reducedOpening ? await import('./round4.mjs') : null;
+  if (stopped) return;
   const {b, p: page, context, cpu, opening, startup, measureWarmOpening} = await helpers.open({
     fixture:probeOnly ? undefined : fixture, reducedOpening, onCleanup: close => { browser = {close}; },
     onProvisional: reducedOpening ? ({warm, value, page, startup, marker}) => {
+      if (stopped) return;
       record({type:warm ? 'warm_opening_provisional' : 'cold_opening_provisional', full_ui_saved:value, corroborated:false, marker_at:new Date().toISOString(), readiness_budget_ms:900000, limitation:'UI sample only; public head not yet corroborated.'});
       if (!warm) {
         provisionalSeen=true;
@@ -71,6 +80,7 @@ try {
     } : undefined,
   });
   browser = b;
+  if (stopped) return;
   let secondPage;
   const readStartup = (phase, operation) => startup ? startup.read(phase, operation) : operation();
   const project = await readStartup('project', () => page.evaluate(async projectId => {
@@ -109,7 +119,9 @@ try {
     record(warm);
     if (!idsMatch || !warm.full_open_corroborated || warmHead.headRevision!==opening.public_head.revision || warmHead.publicationId!==opening.public_head.publication) throw new Error('warm opening did not preserve the corroborated cold public head');
   }
+  if (stopped) return;
   const recorder = await createRecorder(page, {fixture, baseUrl, resultsPath, allowEmpty:probeOnly});
+  if (stopped) return;
   let descriptors = [];
   if (!probeOnly) {
     if (!reducedOpening) {
@@ -146,35 +158,48 @@ try {
     }
     const measurements = [];
     for (let iteration=1; iteration<=3; iteration++) {
+      if (stopped) return;
       let row;
+      const capture = createRowMarkCapture(page);
+      const currentRow = {name:descriptor.name, iteration, capture};
+      activeRow = currentRow;
       const scenarioStart=cpu?.mark();
       try {
-        row = await recorder.runRow({...descriptor, iteration});
+        row = await withBound('row', rowBoundMs(descriptor), () => recorder.runRow({...descriptor, iteration}, capture));
+        if (stopped) return;
         row = {...row, name:descriptor.name, iteration};
         rows.push(row);
         measurements.push(row);
         if (row?.pass !== true) failed = true;
       } catch (error) {
+        if (stopped) return;
+        if (error instanceof SweepBoundError) throw error;
         failed = true;
-        row = {name:descriptor.name, iteration, pass:false, error:String(error?.message || error)};
+        row = await recordThrownRow(currentRow, error, record);
+        if (stopped) return;
         rows.push(row);
         measurements.push(row);
-        fs.appendFileSync(resultsPath, JSON.stringify({type:'row', ...row}) + '\n');
       }
       if (cpu) fs.appendFileSync(resultsPath, JSON.stringify({type:'cpu', name:descriptor.name, iteration, ...cpu.delta(scenarioStart,'scenario')})+'\n');
       const cleanupStart=cpu?.mark();
       try {
-        const cleanup = reducedOpening ? await round4.undoCleanup({page, fixture, baseUrl, result:row}) : await descriptor.cleanup({page, secondPage, fixture, helpers, result:row});
+        const cleanup = await withBound('cleanup', CLEANUP_BOUND_MS, () => reducedOpening
+          ? round4.undoCleanup({page, fixture, baseUrl, result:row})
+          : descriptor.cleanup({page, secondPage, fixture, helpers, result:row}));
+        if (stopped) return;
         fs.appendFileSync(resultsPath, JSON.stringify({type:'cleanup', name:descriptor.name, iteration, result:cleanup ?? null, cpu:cpu?.delta(cleanupStart,'cleanup') ?? null}) + '\n');
         if (!firstAcceptedReported && descriptor.expected === 'saved' && row?.pass === true && cleanup?.changed === true) {
           fs.appendFileSync(resultsPath, JSON.stringify({type:'first_accepted_scenario', name:descriptor.name, iteration, gesture_to_saved_ms:row.ms, restored_content_verified:true, limitation:'Ordinary matrix row after opening; not part of cold-open timing or CPU.'})+'\n');
           firstAcceptedReported = true;
         }
       } catch (error) {
+        if (stopped) return;
         const failure = {type:'cleanup_failure', name:descriptor.name, iteration, error:String(error?.message || error), cpu:cpu?.delta(cleanupStart,'cleanup') ?? null};
         fs.appendFileSync(resultsPath, JSON.stringify(failure) + '\n');
+        if (error instanceof SweepBoundError) throw error;
         throw new Error(`cleanup failed for ${descriptor.name}: ${failure.error}`);
       }
+      activeRow = undefined;
     }
     if (descriptor.expected === 'saved') {
       const durations = measurements.map(row => row.ms);
@@ -187,13 +212,41 @@ try {
     }
   }
   if (typeof recorder.finish === 'function') await recorder.finish();
-} catch (error) {
-  failed = true;
-  console.error(`save-loop: ${error.message}`);
-} finally {
-  if (reducedOpening && !provisionalSeen) record({type:'post_open_blocked', post_open_blocked_s:null, attempts:0, outcome:'missing_ui_marker'});
-  if (browser) await browser.close();
-  if (probePromise) await probePromise.catch(()=>{});
-  console.table(rows.map(row => ({scenario:row.name, run:row.iteration, pass:row.pass, ms:row.ms, reason:row.reason || row.error})));
 }
+
+try {
+  // Includes imports, opening, setup, every row and cleanup, recorder.finish,
+  // browser close and the reduced-opening probe, not just the scenario loop.
+  await withBound('sweep', sweepLimit, async () => {
+    try {
+      await runSweep();
+    } catch (error) {
+      if (error instanceof SweepBoundError) throw error;
+      if (stopped) return;
+      failed = true;
+      console.error(`save-loop: ${error.message}`);
+    }
+    if (stopped) return;
+    if (reducedOpening && !provisionalSeen) record({type:'post_open_blocked', post_open_blocked_s:null, attempts:0, outcome:'missing_ui_marker'});
+    await closeBrowser();
+    if (probePromise) await probePromise.catch(()=>{});
+  });
+} catch (error) {
+  stopped = true;
+  console.error(`save-loop: ${error.message}`);
+  try {
+    if (error instanceof SweepBoundError) {
+      await finishAbortedSweep(error, {activeRow, record, close:closeBrowser});
+    } else {
+      await closeBrowser();
+    }
+  } catch (closeError) {
+    console.error(`save-loop abort/close: ${closeError.message}`);
+  } finally {
+    // Promise.race cannot cancel an in-flight page call. Never let abandoned
+    // Playwright requests or probe promises keep this aborted CLI alive.
+    process.exit(1);
+  }
+}
+console.table(rows.map(row => ({scenario:row.name, run:row.iteration, pass:row.pass, ms:row.ms, reason:row.reason || row.error})));
 if (failed) process.exitCode = 1;

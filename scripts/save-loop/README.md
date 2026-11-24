@@ -128,11 +128,13 @@ SAVE_LOOP_SCRATCH=/absolute/run/fixture SAVE_LOOP_CLIPS=300 \
   node scripts/save-loop/build-fixture.mjs
 ```
 
-With the default floor (300 x 850 = 255,000 bytes) this passes on the
-measured shape: one run accepted 300 clips and 46 shots with a 325,185-byte
-document and a 28.9x warm-move ratio (12.76 s against 0.441 s). An explicit
+With the default floor (300 x 850 = 255,000 bytes) this passes: one run
+accepted 300 clips and 46 shots with a 325,185-byte document and a 23.7x
+warm-move ratio (14.83 s against 0.625 s), manifest `status: pass` and
+`profile_document_bytes_met: false`. The document size is deterministic: an
+earlier run produced the same 325,185 bytes (28.9x). An explicit
 `SAVE_LOOP_DOCUMENT_BYTES=900000` cannot pass with 300 generated clips; that
-same run failed only on its document target. Use the printed manifest with the
+earlier run failed only on its document target. Use the printed manifest with the
 sweep as above. A 300-clip fixture is the qualification shape for Release 15's
 300-clip heavy-timeline journey; it is not the 616-clip standard fixture.
 
@@ -146,7 +148,7 @@ grows with the document, so larger builds take disproportionately longer):
 
 | Build | Wall time | Document |
 | --- | --- | --- |
-| Standard, 300 clips | 13 min 21 s (media import 59 s, clip commits 520 s, shots 136 s) | 325,185 bytes |
+| Standard, 300 clips | 13 min 21 s and 13 min 40 s (media import about 58 s, clip commits about 520 s, shots 136 to 144 s) | 325,185 bytes |
 | Standard, 616 clips (default) | about 67 min | 575,879 to 580,654 bytes |
 | `large-shots`, 30 clips (patched-minimum development check, not a fixture) | 5 min 27 s (child commits 232 s) | 133,563 bytes |
 | `large-shots`, 616 clips | not yet measured; more than 70 min (children start after about 70 min) | not measured |

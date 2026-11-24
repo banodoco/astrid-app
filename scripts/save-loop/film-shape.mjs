@@ -17,6 +17,34 @@ export function filmMediaDurations(shape) {
     videoDuration: Math.max(90, Math.ceil(Math.max(...shape.shots.flatMap(shot => shot.children.map(child => child.hold)),
       shape.contentExtent ? shape.shots[1].duration : 0)))};
 }
+// The 18 November owner profile ("Almost Ready (trial v2)": 616 clips, about
+// 2.6 MB of detached JSON). Generated clips carry far less per-clip data than
+// that real timeline: the standard 616-clip build measures about 576-581 KB, so
+// 2.6 MB is reported against, not required by default.
+export const PROFILE_DOCUMENT_BYTES = 2_600_000;
+// Default document floor: a regression guard for the generated shape (the
+// 616-clip build measures about 935 B per clip).
+export const SYNTHETIC_DOCUMENT_BYTES_PER_CLIP = 850;
+// The sweep needs at least ten video and ten audio targets (6% of clips are video).
+export const STANDARD_MINIMUM_CLIPS = 160;
+
+export function fixtureTargets(clipCount, env = {}) {
+  const read = (name, fallback) => {
+    if (env[name] === undefined || env[name] === '') return fallback;
+    const value = Number(env[name]);
+    if (!Number.isFinite(value) || value <= 0) throw new Error(`invalid ${name}: ${env[name]}`);
+    return value;
+  };
+  const explicit = env.SAVE_LOOP_DOCUMENT_BYTES !== undefined && env.SAVE_LOOP_DOCUMENT_BYTES !== '';
+  return {
+    documentBytes: read('SAVE_LOOP_DOCUMENT_BYTES', clipCount * SYNTHETIC_DOCUMENT_BYTES_PER_CLIP),
+    documentBytesSource: explicit ? 'SAVE_LOOP_DOCUMENT_BYTES'
+      : `default synthetic floor, ${SYNTHETIC_DOCUMENT_BYTES_PER_CLIP} bytes per requested clip`,
+    commitRatio: read('SAVE_LOOP_COMMIT_RATIO', 15),
+    profileDocumentBytes: PROFILE_DOCUMENT_BYTES,
+  };
+}
+
 export function parseFixtureOptions(args = [], env = {}) {
   const options = {};
   let prepareMedia = false;
@@ -50,7 +78,7 @@ export function parseFixtureOptions(args = [], env = {}) {
   if (omitAmbiguousAnchors && variant !== 'film-shaped') throw new Error('--omit-ambiguous-anchors requires --variant film-shaped');
   if (contentExtent && variant !== 'film-shaped') throw new Error('--content-extent requires --variant film-shaped');
   const count = Number(options['--clips'] ?? env.SAVE_LOOP_CLIPS ?? (variant === 'film-shaped' ? 621 : 616));
-  const minimum = variant === 'film-shaped' ? 23 : 616;
+  const minimum = variant === 'film-shaped' ? 23 : STANDARD_MINIMUM_CLIPS;
   if (!Number.isSafeInteger(count) || count < minimum)
     throw new Error(`invalid clip count: ${count}; minimum is ${minimum}`);
   const size = options['--media-size'] ?? env.SAVE_LOOP_MEDIA_SIZE ?? '1280x720';

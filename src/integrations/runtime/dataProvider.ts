@@ -2374,6 +2374,28 @@ function normalizeShotRevisionAssets(
   return [...assets.values()];
 }
 
+/**
+ * Release 14 compatibility (read-time only). Release 14 Agents stored an
+ * `occurrence.create` start as frame-snapped float milliseconds, for example
+ * 128 frames at 30 fps = 4266.666666666667. The editor contract requires an
+ * integer `at_ms`, so such a project would not open. This accepts exactly that
+ * shape: a finite, non-negative, non-integer number in `placement.start_ms`.
+ * Anything else (negative, NaN, strings, an integer, an absent field) returns
+ * undefined and is validated exactly as before.
+ *
+ * Rounding is half-to-even, matching the Agent's integer start rule. A
+ * frames-to-ms value is never exactly .5 except at a real rounding tie, so
+ * this equals Math.round for every stored value seen in practice.
+ */
+export function normalizedStoredStartMs(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || Number.isInteger(value)) return undefined;
+  const floor = Math.floor(value);
+  const fraction = value - floor;
+  if (fraction < 0.5) return floor;
+  if (fraction > 0.5) return floor + 1;
+  return floor % 2 === 0 ? floor : floor + 1;
+}
+
 function runtimeGraphToContract(
   projectId: string,
   timelineId: string,
@@ -2430,9 +2452,14 @@ function runtimeGraphToContract(
   const graphOccurrences = parentOccurrences.map((occurrence, ordinal) => {
     const shotId = requiredString(occurrence.shot_id, `parent composition occurrence[${ordinal}].shot_id`);
     const revisionId = requiredString(occurrence.shot_revision_id ?? occurrence.revision_id, `parent composition occurrence[${ordinal}].shot_revision_id`);
-    const placement = occurrence.placement && typeof occurrence.placement === 'object' && !Array.isArray(occurrence.placement)
+    const storedPlacement = occurrence.placement && typeof occurrence.placement === 'object' && !Array.isArray(occurrence.placement)
       ? occurrence.placement as RuntimeRecord
       : {};
+    // Round the Release 14 fractional start in both codecs at once, on a copy:
+    // `at_ms` and `placement.start_ms` must agree for every capture, and the
+    // canonical document (the save diff base) keeps the stored value.
+    const roundedStartMs = normalizedStoredStartMs(storedPlacement.start_ms);
+    const placement = roundedStartMs === undefined ? storedPlacement : { ...storedPlacement, start_ms: roundedStartMs };
     const atMs = Number(placement.start_ms ?? occurrence.at_ms ?? 0);
     const durationMs = Number(occurrence.duration_ms ?? occurrence.duration ?? 0);
     const occurrenceId = requiredString(occurrence.occurrence_id, `parent composition occurrence[${ordinal}].occurrence_id`);
@@ -2604,6 +2631,20 @@ export async function toRuntimePublication(
     };
   });
   const parentSource = requiredRecord(graph.parent_composition ?? {}, 'parent_composition');
+  // parent_composition keeps the stored occurrences. An occurrence whose start
+  // was only rounded on read (normalizedStoredStartMs) and not moved is written
+  // back with its stored start, so a save does not rewrite it.
+  const storedStartById = new Map<string, unknown>();
+  for (const stored of Array.isArray(parentSource.occurrences) ? parentSource.occurrences : []) {
+    const record = asRecord(stored);
+    const placement = asRecord(record?.placement);
+    if (typeof record?.occurrence_id === 'string' && placement) storedStartById.set(record.occurrence_id, placement.start_ms);
+  }
+  const publishedStartMs = (occurrence: RuntimeRecord): number => {
+    const startMs = Number(occurrence.at_ms ?? 0);
+    const stored = storedStartById.get(String(occurrence.occurrence_id));
+    return normalizedStoredStartMs(stored) === startMs ? stored as number : startMs;
+  };
   const parentComposition = {
     ...parentSource,
     config: parentSource.config ?? {},
@@ -2616,7 +2657,7 @@ export async function toRuntimePublication(
       shot_revision_id: requiredString(occurrence.revision_id, `occurrences[${ordinal}].revision_id`),
       // `at_ms` is the canonical occurrence field. Spread legacy placement
       // metadata first so a stale nested start cannot overwrite a fresh drag.
-      placement: { ...(occurrence.placement as RuntimeRecord ?? {}), start_ms: Number(occurrence.at_ms ?? 0) },
+      placement: { ...(occurrence.placement as RuntimeRecord ?? {}), start_ms: publishedStartMs(occurrence) },
       source_offset: occurrence.source_offset ?? 0,
       duration_ms: Number(occurrence.duration_ms ?? 0),
       speed: occurrence.speed ?? 1,

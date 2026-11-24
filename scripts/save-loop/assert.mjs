@@ -1,4 +1,5 @@
 import {expectedFixtureIds, sameIds} from './readiness.mjs';
+import {createRowMarkCapture, DEFAULT_ROW_TIMEOUT_MS as DEFAULT_TIMEOUT_MS} from './save-marks.mjs';
 /*
  * Public, browser-observable assertions for the Plan 77 save loop.
  * This deliberately observes only the sandbox editor page and Runtime public
@@ -7,7 +8,6 @@ import {expectedFixtureIds, sameIds} from './readiness.mjs';
 
 const SAVE_BADGE_SELECTOR = 'div[role="alert"][data-save-bar]';
 const COMMIT_PATH = /\/commit(?:\?|$)/;
-const DEFAULT_TIMEOUT_MS = 90_000;
 
 function decodeResponse(value) {
   return value?.data && typeof value.data === 'object' ? value.data : value;
@@ -394,7 +394,7 @@ export async function createRecorder(page, {fixture, baseUrl, resultsPath, allow
   page.on('requestfailed', onRequestFailed);
 
   let checkedFixture = false;
-  async function runRow(descriptor) {
+  async function runRow(descriptor, capture = createRowMarkCapture(page)) {
     await installBadgeObserver(page);
     const rowStartedAt = await page.evaluate(() => performance.timeOrigin + performance.now());
     const eventStart = networkEvents.length;
@@ -435,6 +435,8 @@ export async function createRecorder(page, {fixture, baseUrl, resultsPath, allow
       result.badge_before = observerStart.badge;
       const transitionCount = observerStart.transitions.length;
 
+      await capture.start();
+      if (capture.cancelled) throw new Error('row was abandoned by the sweep watchdog');
       gestureOutput = await descriptor.gesture({page, fixture, before, helpers: await import('./lib.mjs'), iteration: descriptor.iteration, mark: () => {}});
       const gestureClock = await page.evaluate(() => ({at: performance.timeOrigin + performance.now()}));
       gestureEndedAt = Number.isFinite(gestureOutput?.gesture_ended_at)
@@ -520,9 +522,15 @@ export async function createRecorder(page, {fixture, baseUrl, resultsPath, allow
         result.reason = `${result.reason}; scenario verification failed: ${reasonOf(error)}`;
       }
     }
+    result.save_marks = await capture.read();
     result.recorded_at = new Date().toISOString();
     const fs = await import('node:fs');
-    fs.appendFileSync(resultsPath, JSON.stringify({type: 'row', ...result}) + '\n');
+    // A watchdog may abandon this promise while a page call is still pending.
+    // Its fallback owns the failure record; never append a late second row.
+    if (!capture.cancelled) {
+      fs.appendFileSync(resultsPath, JSON.stringify({type: 'row', ...result}) + '\n');
+      capture.recorded = true;
+    }
     return result;
   }
 

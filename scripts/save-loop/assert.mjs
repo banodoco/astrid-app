@@ -395,6 +395,8 @@ export async function createRecorder(page, {fixture, baseUrl, resultsPath, allow
 
   let checkedFixture = false;
   async function runRow(descriptor, capture = createRowMarkCapture(page)) {
+    await capture.start();
+    if (capture.cancelled) throw new Error('row was abandoned by the sweep watchdog');
     await installBadgeObserver(page);
     const rowStartedAt = await page.evaluate(() => performance.timeOrigin + performance.now());
     const eventStart = networkEvents.length;
@@ -435,7 +437,6 @@ export async function createRecorder(page, {fixture, baseUrl, resultsPath, allow
       result.badge_before = observerStart.badge;
       const transitionCount = observerStart.transitions.length;
 
-      await capture.start();
       if (capture.cancelled) throw new Error('row was abandoned by the sweep watchdog');
       gestureOutput = await descriptor.gesture({page, fixture, before, helpers: await import('./lib.mjs'), iteration: descriptor.iteration, mark: () => {}});
       const gestureClock = await page.evaluate(() => ({at: performance.timeOrigin + performance.now()}));

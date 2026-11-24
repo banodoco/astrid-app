@@ -31,7 +31,8 @@ and replaces that checkout's `node_modules`; use a disposable committed App
 checkout, not an active development checkout. Chrome uses a temporary
 `/tmp/sl-*` profile that normal browser cleanup removes; forced termination may
 leave that temporary directory behind. The build can fail its clip,
-document-size or timing target checks before Chrome starts. The generated
+document-size or timing target checks before Chrome starts; the failure names
+each missed target. The generated
 fixture uses no owner media and no GPU. Do not point these tools at a hosted or
 owner workspace.
 
@@ -78,12 +79,77 @@ dimensions (default `1280x720`); `--clips` records the requested count (default
 It uses the same disk floor as large shots.
 
 The `large-shots` command creates a fresh stack and performs one fixture build and sweep. It retains
-all standard 616 parent clips, 46 normal shot occurrences, the 2.6 MB document
-and 15x one-clip timing requirements, and all matrix targets. In addition,
+all standard 616 parent clips, 46 normal shot occurrences, the document-size
+floor and 15x one-clip timing requirements, and all matrix targets. In addition,
 three generated 480-second shot occurrences each contain 32 child clips on
 visual and audio tracks. The clips use generated 90-second video and audio
 sources, with 30-second source windows. No user media or GPU is used. The
 variant is optional and does not run as part of the default command.
+Each child commit runs in a fresh SDK commit session, so the builder verifies
+the two child media selections through the Runtime and stages each
+`occurrence.add-media` captured, the same way `t.add()` adds the root clips.
+
+### Fixture size targets
+
+The builder passes when the accepted document has the requested clip count, at
+least `SAVE_LOOP_DOCUMENT_BYTES` canonical bytes, and a warm-move median at
+least `SAVE_LOOP_COMMIT_RATIO` (default 15) times the one-clip control. The
+document default is a floor of 850 bytes per requested clip (523,600 bytes for
+616 clips). It guards against a thinner generated shape; it is not the owner
+profile.
+
+The Plan 77 profile of the owner's real timeline was 616 clips and about
+2.6 MB. Generated clips carry much less per-clip data than that timeline: the
+standard 616-clip build measures about 576 to 581 KB (575,879 and 580,654 bytes
+in two runs) and the 300-clip build 325,185 bytes: about 800 bytes per added
+clip over a fixed 85 KB. Adding clips alone would need roughly 3,000 clips to
+reach 2.6 MB. The manifest therefore records
+`measurement.profile_document_bytes` (2,600,000) and
+`measurement.profile_document_bytes_met`, and the builder prints a note when the
+document is smaller. A passing standard fixture reproduces the profile's clip
+count, track layout, asset mix and warm commit ratio, not its document size.
+To require the profile size anyway, set `SAVE_LOOP_DOCUMENT_BYTES=2600000`;
+the standard shape will then fail.
+
+### Direct builds, the 300-clip recipe and expected times
+
+`run.sh` always builds the default shape: it clears `SAVE_LOOP_CLIPS`,
+`SAVE_LOOP_DOCUMENT_BYTES` and `SAVE_LOOP_COMMIT_RATIO`. For another size, run
+the builder directly against an already owned isolated stack (the same
+`SAVE_LOOP_ROOT` and `SAVE_LOOP_BASE_URL` as above; the stack's editor must run
+from this App checkout). The standard and `large-shots` variants accept 160 or
+more clips (the sweep needs ten video and ten audio targets).
+
+The Release 15 heavy-timeline qualification uses a 300-clip standard fixture:
+
+```sh
+SAVE_LOOP_ROOT=/absolute/run/stack SAVE_LOOP_BASE_URL=http://127.0.0.1:2400 \
+SAVE_LOOP_SCRATCH=/absolute/run/fixture SAVE_LOOP_CLIPS=300 \
+  node scripts/save-loop/build-fixture.mjs
+```
+
+With the default floor (300 x 850 = 255,000 bytes) this passes on the
+measured shape: one run accepted 300 clips and 46 shots with a 325,185-byte
+document and a 28.9x warm-move ratio (12.76 s against 0.441 s). An explicit
+`SAVE_LOOP_DOCUMENT_BYTES=900000` cannot pass with 300 generated clips; that
+same run failed only on its document target. Use the printed manifest with the
+sweep as above. A 300-clip fixture is the qualification shape for Release 15's
+300-clip heavy-timeline journey; it is not the 616-clip standard fixture.
+
+The large nested shots can be added to any size with `--variant large-shots`
+(for example `SAVE_LOOP_CLIPS=300 node scripts/save-loop/build-fixture.mjs
+--variant large-shots`). They add three 480-second shots, 96 child clips, two
+90-second sources and 12 child commits.
+
+Observed build times on one Linux container (single run each; commit time
+grows with the document, so larger builds take disproportionately longer):
+
+| Build | Wall time | Document |
+| --- | --- | --- |
+| Standard, 300 clips | 13 min 21 s (media import 59 s, clip commits 520 s, shots 136 s) | 325,185 bytes |
+| Standard, 616 clips (default) | about 67 min | 575,879 to 580,654 bytes |
+| `large-shots`, 30 clips (patched-minimum development check, not a fixture) | 5 min 27 s (child commits 232 s) | 133,563 bytes |
+| `large-shots`, 616 clips | not yet measured; more than 70 min (children start after about 70 min) | not measured |
 
 Each run has its own directory. `status.json`, the manifest's `variant` and
 `measurement.large_shots`, and the `run` row in `results.jsonl` identify the

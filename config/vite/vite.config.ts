@@ -145,7 +145,7 @@ export default defineConfig(() => {
       astridBridgeAuthPlugin,
       createShareMetaPlugin(process.env.ASTRID_SITE_ORIGIN?.trim() || undefined),
       createInstallerAssetsPlugin(),
-      createAppBuildPlugin({ manifestPath: path.resolve(__dirname, "../../public/install-manifest.json") }),
+      createAppBuildPlugin({ manifestPath: path.resolve(__dirname, "../../public/install-manifest.json"), selectedCheckout: astridSource.checkout, vendorRoot: path.resolve(__dirname, "../../vendor/astrid-browser") }),
       createLocalUpdateStatusPlugin({ manifestPath: path.resolve(__dirname, "../../public/install-manifest.json") }),
       createLocalUpdatePagePlugin(),
       createExtensionImportMapPlugin(),

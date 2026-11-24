@@ -58,6 +58,7 @@ import {
 } from '@/tools/video-editor/data/AssetResolver.ts';
 import type { TimelineBundleEnvelope } from '@/tools/video-editor/data/typed/timelineBundle.ts';
 import { parseTimelineBundle } from '@/tools/video-editor/data/typed/timelineBundle.ts';
+import { repairLegacyTranscriptReferences } from '@/tools/video-editor/data/typed/legacyTranscriptReferences.ts';
 import { withDefaultTimelineOutput } from '@/tools/video-editor/lib/defaults.ts';
 import {
   ShotCompositionUnavailableError,
@@ -1054,7 +1055,7 @@ export class RuntimeDataProvider implements DataProvider {
     if (!configRecord) {
       throw new TimelineSchemaIncompatibleError('Workspace Runtime timeline has no config object');
     }
-    const bundle = configRecord.bundle;
+    const bundle = repairLegacyTranscriptReferences(configRecord.bundle, record.registry);
     if (bundle !== undefined && bundle !== null) parseTimelineBundle(bundle);
     const { bundle: _storedBundle, ...configWithoutBundle } = configRecord;
     const placementFindings: import('@banodoco/timeline-composition').PlacementMigrationFinding[] = [];
@@ -1080,7 +1081,7 @@ export class RuntimeDataProvider implements DataProvider {
     if (!configRecord) {
       throw new TimelineSchemaIncompatibleError('Workspace Runtime timeline has no config object');
     }
-    const bundle = configRecord.bundle;
+    const bundle = repairLegacyTranscriptReferences(configRecord.bundle, record.registry);
     if (bundle !== undefined && bundle !== null) parseTimelineBundle(bundle);
     const { bundle: _storedBundle, ...configWithoutBundle } = configRecord;
     const placementFindings: import('@banodoco/timeline-composition').PlacementMigrationFinding[] = [];

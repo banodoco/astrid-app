@@ -330,6 +330,29 @@ describe('bundle passthrough', () => {
     await expect(providerFor(fixture).loadTimeline(TIMELINE_ID)).rejects.toBeInstanceOf(TimelineBundleParseError);
   });
 
+  it('repairs the Release 14 legacy transcriptReferences shape at load, resolving assetId from the registry', async () => {
+    const legacy = { transcriptReferences: { schema: 'media.transcript.references/v1', associations: [{ documentId: 'doc-1', mediaId: MANAGED_OBJECT_ID, sourceId: 'whisper' }] } };
+    const fixture = runtimeFixture({ parentComposition: composition({
+      config: { clips: [], tracks: [track], bundle: legacy },
+      registry: { assets: { 'asset-video': { file: 'clips/demo.mp4', media_id: MANAGED_OBJECT_ID } } } as unknown as AssetRegistry,
+    }) });
+
+    const loaded = await providerFor(fixture).loadTimeline(TIMELINE_ID);
+
+    expect(loaded.bundle).toMatchObject({
+      schema_version: 1,
+      itemsBySchemaRef: {},
+      transcriptReferences: { associations: [{ assetId: 'asset-video', documentId: 'doc-1', mediaId: MANAGED_OBJECT_ID, sourceId: 'whisper' }] },
+    });
+  });
+
+  it('still fails closed on a legacy row whose media does not resolve', async () => {
+    const legacy = { transcriptReferences: { schema: 'media.transcript.references/v1', associations: [{ documentId: 'doc-1', mediaId: 'sha256:unknown', sourceId: 'whisper' }] } };
+    const fixture = runtimeFixture({ parentComposition: composition({ config: { clips: [], tracks: [track], bundle: legacy } }) });
+
+    await expect(providerFor(fixture).loadTimeline(TIMELINE_ID)).rejects.toBeInstanceOf(TimelineBundleParseError);
+  });
+
   it('rejects an invalid bundle before any publication request', async () => {
     const fixture = runtimeFixture({ parentComposition: composition() });
     const provider = providerFor(fixture);

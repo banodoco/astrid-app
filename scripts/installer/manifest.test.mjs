@@ -89,3 +89,12 @@ test('--in without --out refuses instead of overwriting its input', async () => 
   assert.match(`${result.stdout}${result.stderr}`, /--in needs --out/);
   assert.equal(await readFile(file, 'utf8'), before);
 });
+
+test('manifest pins the default motion pack to exact source and digest', async () => {
+  const manifest = JSON.parse(await readFile(path.join(repo, 'public/install-manifest.json'), 'utf8'));
+  const pin = manifest.packs?.astrid_motion;
+  assert.equal(pin?.repo, 'https://github.com/banodoco/poms_packs');
+  assert.match(pin?.commit ?? '', /^[0-9a-f]{40}$/);
+  assert.equal(pin?.digest_rule, 'pack-tree-v1');
+  assert.match(pin?.digest ?? '', /^[0-9a-f]{64}$/);
+});

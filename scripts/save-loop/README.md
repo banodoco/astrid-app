@@ -45,7 +45,62 @@ An independent optional run exercises large nested shots:
 SAVE_LOOP_CHROME=/absolute/path/to/chrome scripts/save-loop/run.sh --variant large-shots
 ```
 
-This creates a fresh stack and performs one fixture build and sweep. It retains
+The `film-shaped` builder can create a synthetic timeline on an already owned
+isolated SL-1 stack. Set `SAVE_LOOP_ROOT` to the stack root and
+`SAVE_LOOP_BASE_URL` to its local editor origin, then run:
+
+```sh
+node scripts/save-loop/build-fixture.mjs --variant film-shaped
+```
+
+By default the fixture includes two deliberately ambiguous `"repeat"` word
+declarations for refusal checks. Add `--omit-ambiguous-anchors` to omit those
+declarations while retaining their footage clips and the repeated transcript
+words. The measurement reports the two unique resolved targets and the number
+of intentionally omitted declarations.
+
+Extents. The manifest's `measurements` report two numbers separately:
+`content_extent_seconds` is the end of the last clip (what a render covers) and
+`occurrence_extent_seconds` is the end of the last parent occurrence (about
+195.967 for the default 23-clip build). The existing `duration_seconds` key is the
+occurrence extent: by default the fixture is not a 196 s film, because the second
+shot's first four children are deliberately short (0.1 s anchor targets) and the
+content ends far earlier (18 s for 23 clips). Add `--content-extent` (default off,
+`film-shaped` only) to give those children their real extent (occurrence length
+minus offset), so the content runs the full length; narration and its transcript
+still end together at the clip extent and the word anchors stay unique. The default
+output is unchanged without the option.
+
+After the build, the builder reads back the accepted head and exits non-zero with
+`accepted head does not match the planned fixture: ...` if the shot count, child
+clip count, parent clip count or either extent differs from the plan. It does not
+compare individual holds, so the short default children pass.
+
+Requirements: Agent main 514499de or later (plan-88 retained-transcript
+hydration). The parent `config.bundle` carries the editor's `TimelineBundle`
+envelope and association rows `{assetId, documentId, mediaId, sourceId}`; the
+editor accepts the optional `mediaId`/`sourceId` keys only with astrid-app PR #392
+(`release/15/transcript-refs-schema`).
+
+The resulting manifest records the accepted Runtime head and generated media. The
+fixture imports two distinct images and two distinct videos for same-kind overlay
+swaps, and verifies their accepted identities and metadata.
+Collection and project pack admission and render proof remain pending; this
+builder does not establish a successful sweep. Its sources can also be prepared
+independently for development:
+
+```sh
+node scripts/save-loop/build-fixture.mjs --variant film-shaped --prepare-media
+```
+
+This writes a synthetic image and 90-second video and audio to a fresh directory under
+`SAVE_LOOP_SCRATCH` (default `<app-checkout>.env/save-loop`) and prints their
+paths and object hashes. `--media-size WIDTHxHEIGHT` selects the even image and video
+dimensions (default `1280x720`); `--clips` records the requested count (default
+621; minimum 23). Media preparation does not create a timeline or prove the film fixture.
+It uses the same disk floor as large shots.
+
+The `large-shots` command creates a fresh stack and performs one fixture build and sweep. It retains
 all standard 616 parent clips, 46 normal shot occurrences, the 2.6 MB document
 and 15x one-clip timing requirements, and all matrix targets. In addition,
 three generated 480-second shot occurrences each contain 32 child clips on
@@ -186,3 +241,15 @@ one second after the provisional UI marker. The full 85-scenario matrix has not
 completed: repeated guarded cleanup replays history and prevented it from
 finishing. No warm gesture-to-Saved result was established. These rounds do
 not qualify the standard fixture, a warm save target, or a cross-platform run.
+
+For the film-shaped pack fixture, set `SAVE_LOOP_COLLECTION_PACK` to the path
+of the installed `astrid_motion` fixture pack (for example, the Agent checkout's
+`tests/fixtures/packs/astrid_motion`). The Runtime and renderer must also have
+that same pack revision available through their normal pack discovery. The
+builder resolves the collection revision from that source, admits a generated
+project effect, and reports the retained references in the manifest. Pack
+admission and rendering require the Runtime's installed Remotion toolchain.
+
+To run `film-animation-contract.test.mjs`, set `SAVE_LOOP_TEST_PYTHON` to a
+Python interpreter with the Agent package installed (or importable through
+`PYTHONPATH`); it defaults to `python3`.

@@ -100,6 +100,10 @@ export const timelineBundleEnvelopeSchema = z.looseObject({
     associations: z.array(z.strictObject({
       assetId: z.string().min(1),
       documentId: z.string().min(1),
+      // Optional, additive: written by the Agent's `transcripts refresh` so a
+      // row can be re-resolved by media/source. Preserved, never required.
+      mediaId: z.string().min(1).optional(),
+      sourceId: z.string().min(1).optional(),
     })),
   }).optional(),
   itemsBySchemaRef: z.record(z.string().min(1), z.array(sourceFrozenDataItemSchema)),

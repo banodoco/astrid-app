@@ -120,7 +120,7 @@ export function transcriptRepositoryFromDocuments(
 }
 export interface TranscriptReferences {
   schema: "media.transcript.references/v1";
-  associations: { assetId: string; documentId: string }[];
+  associations: { assetId: string; documentId: string; mediaId?: string; sourceId?: string }[];
 }
 export async function transcriptDocumentId(
   projectId: string,

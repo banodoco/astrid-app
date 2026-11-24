@@ -188,14 +188,13 @@ schema:
           onMessage: {type: integer, minimum: 0}
     camera:
       type: array
-      description: Push-ins of the whole window. A step snaps on its frame, unless it has ease linear: then zoom and focus tween in a straight line from the previous step's frame to its own. Zoom is 1-8 (fractional allowed); focus is in window px and lands on the frame centre.
+      description: Stepped integer push-ins of the whole window. Each step snaps on its frame; focus is in window px and lands on the frame centre.
       items:
         type: object
         required: [at, zoom]
         properties:
           at: {type: integer, minimum: 0}
-          zoom: {type: number, minimum: 1, maximum: 8}
-          ease: {type: string, enum: [linear]}
+          zoom: {type: integer, enum: [1, 2, 3]}
           focus:
             type: object
             properties:

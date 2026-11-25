@@ -79,6 +79,7 @@ import {
 } from './generationProjection.ts';
 import { listAllRuntimeVariants } from './generationAccess.ts';
 import { recordShotTimelinePhase } from '@/tools/video-editor/lib/shot-timeline-timing.ts';
+import { recordTimelineSaveMark } from '@/tools/video-editor/lib/timeline-save-marks.ts';
 import { isTimelineDiagnosticsEnabled } from '@/tools/video-editor/lib/timeline-diagnostics.ts';
 import { initializeBootstrapTimeline as initializeNativeBootstrapTimeline, recoverBootstrapInitialization } from './bootstrapInitialization.ts';
 import { createCommitOutbox } from '@/tools/video-editor/commands/commitOutbox.ts';
@@ -366,6 +367,7 @@ export class RuntimeDataProvider implements DataProvider {
     },
   };
   private readonly onRuntimeError?: (error: RuntimeConnectorError) => void;
+  private shotTimelineTraceId: string | null = null;
   private activeRegistry: AssetRegistry | null = null;
   private readonly canonicalTimelineState = new Map<string, CanonicalTimelineState>();
   private readonly checkedHeads = new Map<string, { checkedAt: number; inspection: TimelineInspectionResult }>();
@@ -762,6 +764,10 @@ export class RuntimeDataProvider implements DataProvider {
     return this.client.getRecoverableIdentity();
   }
 
+  setShotTimelineTraceId(traceId: string | null): void {
+    this.shotTimelineTraceId = traceId;
+  }
+
   /**
    * Send a producer-built command batch and consume only its returned closure.
    * This adapter deliberately does not inspect the mutable head or rebuild the
@@ -774,12 +780,16 @@ export class RuntimeDataProvider implements DataProvider {
     if (!request.base_revision_id || !request.base_publication_id) {
       throw new TimelineSchemaIncompatibleError('Timeline commit requires a verified revision and publication base');
     }
+    const traceId = this.shotTimelineTraceId;
+    this.shotTimelineTraceId = null;
     const response = await this.client.commitTimeline(
       request.project_id,
       request.timeline_id,
       request,
       idempotencyKey,
+      traceId ? () => recordTimelineSaveMark(traceId, 'post-sent') : undefined,
     );
+    if (traceId) recordTimelineSaveMark(traceId, '200');
     if (response.receipt === null) {
       throw new TimelineSchemaIncompatibleError('Timeline preview is not an accepted commit');
     }

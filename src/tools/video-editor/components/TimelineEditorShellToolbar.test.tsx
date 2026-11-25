@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { exitEditorTour, startEditorTour } from '@/shared/state/editorTourStore.ts';
 import { TimelineEditorShellToolbar } from './TimelineEditorShellToolbar.tsx';
 import { createTimelineStore, TimelineStoreProvider } from '@/tools/video-editor/hooks/timelineStore.ts';
+import { recordTimelineSaveMark } from '@/tools/video-editor/lib/timeline-save-marks.ts';
 
 // '' is same-origin; a gateway origin is the hosted build.
 let hostedOrigin = '';
@@ -69,7 +70,7 @@ describe('TimelineEditorShellToolbar', () => {
   });
 
   describe('the save badge', () => {
-    const renderToolbar = (saveStatus: 'saved' | 'saving' | 'dirty' | 'retrying' | 'error', unsaved = false) => {
+    const renderToolbar = (saveStatus: 'saved' | 'saving' | 'dirty' | 'retrying' | 'error', unsaved = false, timelineLoaded = true) => {
       const store = createTimelineStore();
       store.setState((state) => ({ chrome: { ...state.chrome, saveStatus, saveBar: unsaved ? { kind: 'refused' as const, headline: 'x' } : null } }));
       return render(
@@ -84,6 +85,7 @@ describe('TimelineEditorShellToolbar', () => {
             onDividerLostPointerCapture={() => {}}
             isTimelineMaximized={false}
             setIsTimelineMaximized={() => {}}
+            timelineLoaded={timelineLoaded}
           />
         </TimelineStoreProvider>,
       );
@@ -93,6 +95,20 @@ describe('TimelineEditorShellToolbar', () => {
       renderToolbar('error');
       const badge = screen.getByText('error');
       expect(badge.className).toContain('bg-destructive');
+    });
+
+    it('exposes a readable Saved status and marks it after the badge is committed', () => {
+      const previousMarks = new Set(performance.getEntriesByType('mark').map((entry) => entry.name));
+      recordTimelineSaveMark('toolbar-save-trace', 'post-sent');
+      recordTimelineSaveMark('toolbar-save-trace', '200');
+
+      renderToolbar('saved', false, true);
+
+      expect(screen.getByText('saved')).toHaveAttribute('data-timeline-save-status', 'saved');
+      const savedMark = performance.getEntriesByType('mark').find((entry) =>
+        entry.name.endsWith('.saved-badge') && !previousMarks.has(entry.name));
+      expect(savedMark?.name).toMatch(/^astrid\.save\.\d+\.saved-badge$/);
+      expect(savedMark?.name).not.toContain('toolbar-save-trace');
     });
 
     it('reads Not saved, neutral and muted, while the Astrid stopped / restarted card is showing', () => {

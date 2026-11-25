@@ -1557,7 +1557,7 @@ export class RuntimeDataProvider implements DataProvider {
       if (!config) {
         throw new TimelineSchemaIncompatibleError('Workspace Runtime canonical timeline has no config object');
       }
-      const clips = canonicalParentClips(parentComposition, config);
+      const clips = normalizedStoredClipStarts(canonicalParentClips(parentComposition, config));
       const version = previous && previous.headRevisionId === headRevisionId
         && sameVerifiedPublication
         ? previous.version
@@ -2190,7 +2190,7 @@ function reconcileParentClips(
     if (Object.prototype.hasOwnProperty.call(clip, 'transition') && clip.transition === undefined) {
       delete reconciled.transition;
     }
-    return reconciled;
+    return restoreStoredClipStart(reconciled, canonical);
   });
 }
 
@@ -2407,6 +2407,33 @@ export function normalizedStoredStartMs(value: unknown): number | undefined {
   return floor % 2 === 0 ? floor : floor + 1;
 }
 
+/** Only the editor copy rounds legacy clip starts; malformed values stay visible. */
+function normalizedStoredClipStarts(clips: unknown): unknown {
+  if (!Array.isArray(clips)) return clips;
+  return clips.map((raw) => {
+    const clip = asRecord(raw);
+    const rounded = normalizedStoredStartMs(clip?.at_ms);
+    return clip && rounded !== undefined ? { ...clip, at_ms: rounded } : raw;
+  });
+}
+
+/** A read-only rounding change is not an authored move, just as for occurrences. */
+function restoreStoredClipStart(clip: RuntimeRecord, stored?: RuntimeRecord): RuntimeRecord {
+  const rounded = normalizedStoredStartMs(stored?.at_ms);
+  return stored && rounded !== undefined && clip.at_ms === rounded
+    ? { ...clip, at_ms: stored.at_ms } : clip;
+}
+
+function restoreStoredClipStarts(clips: unknown, stored: unknown): unknown {
+  if (!Array.isArray(clips) || !Array.isArray(stored)) return clips;
+  const byId = new Map(stored.map(asRecord).filter((clip): clip is RuntimeRecord => Boolean(clip))
+    .filter((clip) => typeof clip.id === 'string').map((clip) => [clip.id, clip]));
+  return clips.map((raw) => {
+    const clip = asRecord(raw);
+    return clip ? restoreStoredClipStart(clip, byId.get(clip.id)) : raw;
+  });
+}
+
 function runtimeGraphToContract(
   projectId: string,
   timelineId: string,
@@ -2450,7 +2477,9 @@ function runtimeGraphToContract(
           : timelineId,
         revision_id: requiredString(internal.revision_id, 'internal timeline revision.revision_id'),
         content_digest: requiredString(internal.content_digest, 'internal timeline revision.content_digest'),
-        timeline: timelinePayload,
+        // Retain the stored starts when an unrelated child edit is published.
+        rawJson: timelinePayload,
+        timeline: { ...timelinePayload, clips: normalizedStoredClipStarts(timelinePayload.clips) },
       },
       dependencies: canonicalArray(shotPayload.dependencies),
       assets,
@@ -2504,8 +2533,13 @@ function runtimeGraphToContract(
     }
   }
   const headRevisionId = requiredString(parent.revision_id, 'parent composition revision.revision_id');
+  const parentConfig = asRecord(parentPayload.config);
+  canonicalParentClips(parentPayload, parentConfig ?? {});
   const parentGraph = {
     ...parentPayload,
+    ...(Array.isArray(parentPayload.clips) ? { clips: normalizedStoredClipStarts(parentPayload.clips) } : {}),
+    ...(parentConfig && Array.isArray(parentConfig.clips)
+      ? { config: { ...parentConfig, clips: normalizedStoredClipStarts(parentConfig.clips) } } : {}),
   };
   return {
     schema_version: 1,
@@ -2516,6 +2550,8 @@ function runtimeGraphToContract(
       head: { revision_id: headRevisionId, content_digest: requiredString(parent.content_digest, 'parent composition revision.content_digest') },
     },
     parent_composition: parentGraph,
+    // This save basis keeps legacy fractions outside the editor's display copy.
+    raw_parent_composition: parentPayload,
     shot_revisions: shotRevisions,
     occurrences: graphOccurrences,
     cases: {
@@ -2629,7 +2665,10 @@ export async function toRuntimePublication(
     const timelineRevision = {
       timeline_id: internalTimelineId,
       revision_id: internalRevisionId,
-      payload: internalTimeline,
+      payload: internal.rawJson === undefined ? internalTimeline : {
+        ...internalTimeline,
+        clips: restoreStoredClipStarts(internalTimeline.clips, asRecord(internal.rawJson)?.clips),
+      },
     };
     if (internal.publish === true) {
       internalByKey.set(`${internalTimelineId}\u0000${internalRevisionId}`, timelineRevision);
@@ -2642,6 +2681,8 @@ export async function toRuntimePublication(
     };
   });
   const parentSource = requiredRecord(graph.parent_composition ?? {}, 'parent_composition');
+  const storedParent = asRecord(graph.raw_parent_composition) ?? parentSource;
+  const parentConfig = asRecord(parentSource.config);
   // parent_composition keeps the stored occurrences. An occurrence whose start
   // was only rounded on read (normalizedStoredStartMs) and not moved is written
   // back with its stored start, so a save does not rewrite it.
@@ -2658,9 +2699,12 @@ export async function toRuntimePublication(
   };
   const parentComposition = {
     ...parentSource,
-    config: parentSource.config ?? {},
+    config: parentConfig && Array.isArray(parentConfig.clips) ? {
+      ...parentConfig,
+      clips: restoreStoredClipStarts(parentConfig.clips, asRecord(storedParent.config)?.clips),
+    } : parentSource.config ?? {},
     registry: parentSource.registry ?? {},
-    clips: parentSource.clips ?? [],
+    clips: restoreStoredClipStarts(parentSource.clips ?? [], storedParent.clips),
     occurrences: occurrences.map((occurrence, ordinal) => ({
       ...occurrence,
       occurrence_id: requiredString(occurrence.occurrence_id, `occurrences[${ordinal}].occurrence_id`),

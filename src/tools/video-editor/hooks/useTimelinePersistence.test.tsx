@@ -2679,30 +2679,45 @@ describe('useTimelinePersistence — write-ack watchdog', () => {
     const edited = buildDataFromCurrentRegistry({ ...original.config,
       clips: original.config.clips.map(clip => ({ ...clip, at: 5 })) }, original);
     const landed = structuredClone(document);
-    landed.parent_revision.payload.config = structuredClone(edited.config);
-    landed.parent_revision.payload.clips = structuredClone(edited.config.clips);
+    // Runtime returns finite JSON, not an editor-normalized TimelineConfig
+    // (which can carry own undefined fields such as pinnedShotGroups).
+    // Apply the authored move to the verified raw document, as the commit does.
+    for (const list of [landed.parent_revision.payload.clips, landed.parent_revision.payload.config.clips]) {
+      for (const clip of list as Array<Record<string, unknown>>) {
+        if (clip.id === original.config.clips[0].id) clip.at = 5;
+      }
+    }
     landed.parent_revision.revision_id = 'r1';
     landed.parent_revision.content_digest = fixtureDigest(landed.parent_revision.payload);
     const response = acceptedCommit({ revision_id: 'r1', publication_id: 'p1' }, { revision_id: 'r0', publication_id: 'p0' },
       { timelineId: 'timeline-1' });
     response.data.canonical_document = landed;
+    response.data.document_digest = fixtureDigest(landed);
+    const commitResult = { response, accepted: { revisionId: 'r1', publicationId: 'p1' },
+      canonicalDocument: landed, graph: {}, receipt: response.receipt };
+    // Fail at the fixture boundary rather than misreporting an invalid
+    // fabricated "200" as a lost acknowledgement in the local save pump.
+    toOutboxJson(commitResult);
     let markStarted!: () => void;
     const started = new Promise<void>(resolve => { markStarted = resolve; });
     let finishSend!: () => void;
     const send = vi.fn<NonNullable<DataProvider['commitTimeline']>>(() => new Promise(resolve => {
-      finishSend = () => resolve({ response, accepted: { revisionId: 'r1', publicationId: 'p1' },
-        canonicalDocument: landed, graph: {}, receipt: response.receipt });
+      finishSend = () => resolve(commitResult);
       markStarted();
     }));
     let progress: (() => void) | undefined;
     const local = await createLocalSaveSession({ scope, initial, document: toOutboxJson(document), outboxes, send,
       loadLatest: vi.fn(async () => initial), changed: vi.fn(), progress: () => progress?.(),
       prepareDisplay: async basis => ({ document: toOutboxJson(basis.canonicalDocument), adopt: vi.fn() }) });
-    const nextHead = { ...original.head, headRevisionId: 'r1', headPublicationId: 'p1' };
     const handoff = {
       ...createTimelineLocalSaveHandoff({ initial, source: { config: original.config, registry: original.registry, head: original.head },
-        session: local, adopted: () => ({ receipt: { configVersion: 2, head: nextHead },
-          source: { config: edited.config, registry: edited.registry, head: nextHead } }) }),
+        session: local, adopted: basis => {
+          expect(basis.canonicalDocument).toEqual(landed);
+          expect(basis.head).toEqual(commitResult.accepted);
+          const adoptedHead = { ...original.head!, headRevisionId: basis.head.revisionId, headPublicationId: basis.head.publicationId };
+          return { receipt: { configVersion: 2, head: adoptedHead },
+            source: { config: edited.config, registry: edited.registry, head: adoptedHead } };
+        } }),
       status: () => local.getState().status,
     };
     const harness = setup({ initialData: original, localDocumentSave: handoff });
@@ -2754,7 +2769,12 @@ describe('useTimelinePersistence — write-ack watchdog', () => {
       expect(harness.result.current.watchdogTripped).toBe(false);
       expect(bar()).toBeNull();
       expect(send).toHaveBeenCalledTimes(1);
-      expect((await outboxes.list(scope))[0].accepted).toBeTruthy();
+      const [stored] = await outboxes.list(scope);
+      expect(stored.accepted).toBeTruthy();
+      expect(stored.accepted?.head).toEqual(commitResult.accepted);
+      expect(stored.pending).toBeUndefined();
+      expect(stored.intents).toHaveLength(0);
+      expect(local.getDocument()).toEqual(landed);
       await advance(WATCHDOG_LIVE_CEILING_MS);
       expect(harness.result.current.watchdogTripped).toBe(false);
     } finally {

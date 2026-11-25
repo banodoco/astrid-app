@@ -21,7 +21,7 @@ export default defineConfig({
       '@': path.resolve(projectRoot, 'src'),
       '@test-react-refresh': path.resolve(projectRoot, 'node_modules/@vitejs/plugin-react-swc/refresh-runtime.js'),
       '@astrid/editor-sdk': path.resolve(projectRoot, 'src/sdk/index.ts'),
-      ...(astridSource ? { '@astrid': astridSource.sourceRoot } : {}),
+      ...(astridSource ? { '@astrid': astridSource.sourceRoot, '@astrid-rendering/shared': path.join(astridSource.sourceRoot, 'packs/rendering/shared') } : {}),
       ...(astridPublicSource ? { '@astrid-public': astridPublicSource.sourceRoot } : {}),
       'fake-indexeddb': path.resolve(projectRoot, 'vendor/fake-indexeddb/index.js'),
       // Share one React/Remotion runtime with Composition and linked host elements.

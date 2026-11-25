@@ -1,6 +1,6 @@
 {
   "schema": "astrid-vendor-files/v1",
-  "comment": "Declared file set copied from an Astrid commit into vendor/astrid-browser by scripts/astrid-landing/refresh-vendor.mjs. Paths are Astrid-repo-relative and are kept as-is under the destination.",
+  "comment": "Declared browser file set; astrid_motion is the complete verified RN-5b-min projection (not extension-filtered raw source). All other paths are Astrid-repo-relative.",
   "license": "LICENSE",
   "directories": [
     {

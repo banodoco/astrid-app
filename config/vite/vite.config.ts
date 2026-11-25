@@ -145,7 +145,7 @@ export default defineConfig(() => {
       astridBridgeAuthPlugin,
       createShareMetaPlugin(process.env.ASTRID_SITE_ORIGIN?.trim() || undefined),
       createInstallerAssetsPlugin(),
-      createAppBuildPlugin({ manifestPath: path.resolve(__dirname, "../../public/install-manifest.json") }),
+      createAppBuildPlugin({ manifestPath: path.resolve(__dirname, "../../public/install-manifest.json"), selectedCheckout: astridSource.checkout, vendorRoot: path.resolve(__dirname, "../../vendor/astrid-browser") }),
       createLocalUpdateStatusPlugin({ manifestPath: path.resolve(__dirname, "../../public/install-manifest.json") }),
       createLocalUpdatePagePlugin(),
       createExtensionImportMapPlugin(),
@@ -157,7 +157,7 @@ export default defineConfig(() => {
       alias: {
         "@": path.resolve(__dirname, "../../src"),
         "@astrid/editor-sdk": path.resolve(__dirname, "../../src/sdk/index.ts"),
-        ...(astridSource ? { "@astrid": astridSource.sourceRoot } : {}),
+        ...(astridSource ? { "@astrid": astridSource.sourceRoot, "@astrid-rendering/shared": path.join(astridSource.sourceRoot, "packs/rendering/shared") } : {}),
         ...(astridPublicSource ? { "@astrid-public": astridPublicSource.sourceRoot } : {}),
         // Sprint 5: deduplicate React / Remotion / @banodoco/* across the
         // linked timeline-composition + timeline-theme-* packages so a

@@ -64,6 +64,8 @@ import type { ProcessStatus } from '@/sdk/video/families/processes';
 import type { ContributionRenderability } from '@/tools/video-editor/runtime/renderability.ts';
 import type { VideoEditorProcessDescriptor } from '@/tools/video-editor/runtime/extensionSurface.ts';
 
+declare const __ASTRID_EDITOR_PACK_REVISIONS__: Record<string, string> | null;
+
 /** Minimal clip shape we need from the resolved timeline. */
 export interface RouterClipShape extends GeneratedLaneClipShape {
   clipType?: string;
@@ -721,6 +723,7 @@ export interface AstridRuntimeRenderTimelinePayload {
   output_filename: string;
   project_id: string;
   correlation_id: string;
+  editor_pack_revisions?: Record<string, string>;
   /** Ordered managed CAS identities from the resolved Runtime registry. */
   input_object_ids?: string[];
 }
@@ -887,6 +890,9 @@ export function buildRenderTimelinePayload(
       project_id: request.renderRuntime.projectId,
       correlation_id: input.correlationId ?? newCorrelationId(),
       input_object_ids: managedInputs.ids,
+      ...(typeof __ASTRID_EDITOR_PACK_REVISIONS__ !== 'undefined' && __ASTRID_EDITOR_PACK_REVISIONS__ !== null
+        ? { editor_pack_revisions: __ASTRID_EDITOR_PACK_REVISIONS__ }
+        : {}),
     },
   };
 }
@@ -969,6 +975,7 @@ export async function enqueueAstridRuntimeRenderTimeline(
           timeline_ref: payload.timeline_id,
           ...(selector === undefined ? {} : { selector }),
           output_name: payload.output_filename,
+          ...(payload.editor_pack_revisions === undefined ? {} : { editor_pack_revisions: payload.editor_pack_revisions }),
           ...canonicalAdmissionMetadata(payload.timeline),
         },
         output_policy: {

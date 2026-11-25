@@ -436,7 +436,7 @@ export const ASTRID_ELEMENT_CATALOG: readonly AstridRenderingElementDescriptor[]
       "preview": "unknown",
       "workerExport": "unknown"
     },
-    "revision": "sha256:f4b453923da74f104d41baf34ab9760bc7474d53d7ce034e11e0ec0197babf29",
+    "revision": "sha256:9dbcdafcb7db820fafc049acf4efbd4b1c6cbd3003b74b975c2382a211f95cc0",
     "runtime": {},
     "schema": {
       "additionalProperties": true,
@@ -645,7 +645,7 @@ export const ASTRID_ELEMENT_CATALOG: readonly AstridRenderingElementDescriptor[]
       "preview": "unknown",
       "workerExport": "unknown"
     },
-    "revision": "sha256:925b5da1cec8399e4362e131978fb5a699d1e524db7912bfba31eaecda6001db",
+    "revision": "sha256:4541fd5aa70186b41442f9e0e73c57bbcdcfd22fee65732bbefd1d1f5d9e4951",
     "runtime": {},
     "schema": {
       "additionalProperties": true,
@@ -833,7 +833,7 @@ export const ASTRID_ELEMENT_CATALOG: readonly AstridRenderingElementDescriptor[]
       "preview": "unknown",
       "workerExport": "unknown"
     },
-    "revision": "sha256:4c596f7b6302bb361d7c5bb9e70d2c3b870706d5d546557e91d0c9c838191f5f",
+    "revision": "sha256:69d51e783c1bea67b72d5bd7ef9146ac08f1dbcfad1cfbe9382c1d716e94b475",
     "runtime": {},
     "schema": {
       "additionalProperties": true,
@@ -1142,7 +1142,7 @@ export const ASTRID_ELEMENT_CATALOG: readonly AstridRenderingElementDescriptor[]
       "preview": "unknown",
       "workerExport": "unknown"
     },
-    "revision": "sha256:2250fa68ac6a18cdbbfb91a32f5a5219bbdd1c1597f20fe8515db173f20c979c",
+    "revision": "sha256:229d7a3d2004068c2343bc40d495785df66cf5f3a6ed199d7c392d710b66b9c4",
     "runtime": {},
     "schema": {
       "additionalProperties": true,
@@ -1581,7 +1581,7 @@ export const ASTRID_ELEMENT_CATALOG: readonly AstridRenderingElementDescriptor[]
       "preview": "unknown",
       "workerExport": "unknown"
     },
-    "revision": "sha256:cef6dcda3287cb4b4bedcd745b03b59ba877f04c81c4f1c2ac473d5ee36ec6a0",
+    "revision": "sha256:e90e0a3f31e2aae629c973c4c26fcdeed1535ad64729c1a593443b010d7e0a07",
     "runtime": {},
     "schema": {
       "additionalProperties": true,
@@ -1749,7 +1749,7 @@ export const ASTRID_ELEMENT_CATALOG: readonly AstridRenderingElementDescriptor[]
       "preview": "unknown",
       "workerExport": "unknown"
     },
-    "revision": "sha256:a4bc07a765b6d9b03e089e6a1486edccf880bfdebce2b691820950eef5ae7d30",
+    "revision": "sha256:d82e68b4da5a46bc2095bf041d775c964dd2825cb815cb73977500b20ddc6260",
     "runtime": {},
     "schema": {
       "additionalProperties": false,
@@ -1920,7 +1920,7 @@ export const ASTRID_ELEMENT_CATALOG: readonly AstridRenderingElementDescriptor[]
       "preview": "unknown",
       "workerExport": "unknown"
     },
-    "revision": "sha256:ee8dbd8f18280eb6d990eeae00df4dbde286a69bc7ff4986765cdfbf6c0088c8",
+    "revision": "sha256:eb4702c226ad57c71bb99818e816576efe891f2cf6d5bdae85c095c0da69d590",
     "runtime": {},
     "schema": {
       "additionalProperties": true,
@@ -2172,7 +2172,7 @@ export const ASTRID_ELEMENT_CATALOG: readonly AstridRenderingElementDescriptor[]
       "preview": "unknown",
       "workerExport": "unknown"
     },
-    "revision": "sha256:ddd69a50932c3bfd8d516502f278584966b998164a5832363d1457047c77887a",
+    "revision": "sha256:b75d0d8a7573c9a7e75e16ff3e5d0c45b58b44790927e7fc4293cedc6adbfa8a",
     "runtime": {},
     "schema": {
       "additionalProperties": true,
@@ -2299,7 +2299,7 @@ export const ASTRID_ELEMENT_CATALOG: readonly AstridRenderingElementDescriptor[]
       "preview": "unknown",
       "workerExport": "unknown"
     },
-    "revision": "sha256:ecadc01975a98c5cefd16ff77e94a2da5706e5fc484cabe75a36cb81c8f77ac8",
+    "revision": "sha256:449f66d69c3bf9efb983dec35b540c461d142392d3f29eef0763bab7753bd7a1",
     "runtime": {},
     "schema": {
       "additionalProperties": true,
@@ -2478,7 +2478,7 @@ export const ASTRID_ELEMENT_CATALOG: readonly AstridRenderingElementDescriptor[]
       "preview": "unknown",
       "workerExport": "unknown"
     },
-    "revision": "sha256:2d577666ef40811883a896230261fc15baef2d76b39cceafbd0e6ddd5cc8a922",
+    "revision": "sha256:b3a54ddb4ae47472f8e0cfcfa1960888d000f38574dff6469254842122cbbcff",
     "runtime": {},
     "schema": {
       "additionalProperties": true,
@@ -2647,7 +2647,7 @@ export const ASTRID_ELEMENT_CATALOG: readonly AstridRenderingElementDescriptor[]
       "preview": "unknown",
       "workerExport": "unknown"
     },
-    "revision": "sha256:b3160419366de1feca034b3ff24898fcac6213efbad14ec869b24679653d2f7b",
+    "revision": "sha256:d34f3855d4fa731ed0d92c3dbeecaa1ac2f6b895fc49a34c3ecf3c63d0248c49",
     "runtime": {},
     "schema": {
       "additionalProperties": true,
@@ -2795,7 +2795,7 @@ export const ASTRID_ELEMENT_CATALOG: readonly AstridRenderingElementDescriptor[]
       "preview": "unknown",
       "workerExport": "unknown"
     },
-    "revision": "sha256:d1a32dfcb2e1c7fcc51d759000f073b47153bd04bec0f54773e9e96cd599e2f4",
+    "revision": "sha256:01045dd31ca0502749a1f8005c08a41dd51e8494bb2a64bfb17eea9a658bee66",
     "runtime": {},
     "schema": {
       "additionalProperties": true,
@@ -3024,7 +3024,7 @@ export const ASTRID_ELEMENT_CATALOG: readonly AstridRenderingElementDescriptor[]
       "preview": "unknown",
       "workerExport": "unknown"
     },
-    "revision": "sha256:690b0294deb40dc8d5dffc414016cb1034cb1faa245a8ac68a6d95f9a172b585",
+    "revision": "sha256:5e262112baf5e7606b614f2724c0368e51445f55e62476f59e4b7ff4c5242377",
     "runtime": {},
     "schema": {
       "additionalProperties": true,
@@ -3147,7 +3147,7 @@ export const ASTRID_ELEMENT_CATALOG: readonly AstridRenderingElementDescriptor[]
       "preview": "unknown",
       "workerExport": "unknown"
     },
-    "revision": "sha256:6a95a20ef736973afe72addfc4b542f6409e47a3afb209f1b366e2966ea40b78",
+    "revision": "sha256:4eb392c2eace3e9f33cb3fabed0b9ab78d76e61816fa4c8a802fc1f091b1a69e",
     "runtime": {},
     "schema": {
       "additionalProperties": true,
@@ -3326,7 +3326,7 @@ export const ASTRID_ELEMENT_CATALOG: readonly AstridRenderingElementDescriptor[]
       "preview": "unknown",
       "workerExport": "unknown"
     },
-    "revision": "sha256:95e056c78f81e0455f49511dd8569438a5b9dc5975ea9672b8fa17bfe2cea296",
+    "revision": "sha256:86f2233a7fb59b62dcdb4db2d7f9a88c0253dd03e8bb5257fb1785670b2fb5a6",
     "runtime": {},
     "schema": {
       "additionalProperties": true,
@@ -3601,7 +3601,7 @@ export const ASTRID_ELEMENT_CATALOG: readonly AstridRenderingElementDescriptor[]
       "preview": "unknown",
       "workerExport": "unknown"
     },
-    "revision": "sha256:da9e894e6ad65f4503f60a9adf80596ad88ec1436302dcf57783d880496e1966",
+    "revision": "sha256:e0a917b595a57b564bbc15c8dd8c0a73cd5164151c389d27c0a70393ab335008",
     "runtime": {},
     "schema": {
       "additionalProperties": true,
@@ -3820,7 +3820,7 @@ export const ASTRID_ELEMENT_CATALOG: readonly AstridRenderingElementDescriptor[]
       "preview": "unknown",
       "workerExport": "unknown"
     },
-    "revision": "sha256:d0fd44ba12f00df99bddbb43c1cf0bbedf07fc771ba6db85e238e9897f330370",
+    "revision": "sha256:e40666791c266a846a97ca8f5b9748f7e0da45caf1d0828053d746323758bab7",
     "runtime": {},
     "schema": {
       "additionalProperties": true,
@@ -3934,7 +3934,7 @@ export const ASTRID_ELEMENT_CATALOG: readonly AstridRenderingElementDescriptor[]
       "preview": "unknown",
       "workerExport": "unknown"
     },
-    "revision": "sha256:556a19bb225c718bd65e9755646f5fcfab3edd9b8f3612a806f7f8bfb4b5a96a",
+    "revision": "sha256:3b31d77718621ea22d09d9988b140149c05d44c1344f5157297ee4c12a54abd5",
     "runtime": {},
     "schema": {
       "additionalProperties": true,
@@ -4135,7 +4135,7 @@ export const ASTRID_ELEMENT_CATALOG: readonly AstridRenderingElementDescriptor[]
       "preview": "unknown",
       "workerExport": "unknown"
     },
-    "revision": "sha256:75ef63dfb4bbbebaaf36b2e68f9c5b0da0b54d49537820bcaadb11591ffa42fe",
+    "revision": "sha256:b84cab70114f2a3bdf5400ee692fb5cc1fdf03dda84894712f962148d0e3a8a4",
     "runtime": {},
     "schema": {
       "additionalProperties": true,
@@ -4389,7 +4389,7 @@ export const ASTRID_ELEMENT_CATALOG: readonly AstridRenderingElementDescriptor[]
       "preview": "unknown",
       "workerExport": "unknown"
     },
-    "revision": "sha256:5cf8c64ff73e0018fe7d17263f23188342d1a29287441ec72c080a077edd3577",
+    "revision": "sha256:8f5be7cf9dbd4373b145523711053a89400eec543d363090ac74ec34e0e58856",
     "runtime": {},
     "schema": {
       "additionalProperties": true,

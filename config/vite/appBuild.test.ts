@@ -1,8 +1,8 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { createAppBuildPlugin, resolveAppBuildInfo } from './appBuild';
+import { createAppBuildPlugin, resolveAppBuildInfo, resolveEditorPackRevisions } from './appBuild';
 
 describe('App build info', () => {
   it('keeps the App build independent and binds release to the supplied manifest', () => {
@@ -42,4 +42,69 @@ describe('App build info', () => {
       rmSync(directory, { recursive: true, force: true });
     }
   });
+
+  it('snapshots vendored pack revisions only for the selected vendor source', () => {
+    const directory = mkdtempSync(path.join(tmpdir(), 'astrid-provenance-'));
+    const vendorRoot = path.join(directory, 'vendor');
+    const alternate = path.join(directory, 'alternate');
+    const manifestPath = path.join(directory, 'manifest.json');
+    const provenancePath = path.join(vendorRoot, 'provenance.json');
+    mkdirSync(vendorRoot);
+    mkdirSync(alternate);
+    mkdirSync(path.join(vendorRoot, 'astrid/tools'), { recursive: true });
+    writeFileSync(path.join(vendorRoot, 'astrid/tools/catalog.json'), JSON.stringify({ tools: [{ id: 'video-editor', pack_id: 'video_editing', entry: { host_entry: 'video-editor' }, manifest: { path: 'pack.yaml' } }] }));
+    writeFileSync(manifestPath, '{}');
+    const commit = 'a'.repeat(40);
+    const define = (selectedCheckout: string) => {
+      const plugin = createAppBuildPlugin({ appBuild: 'app', manifestPath, selectedCheckout, vendorRoot });
+      return plugin.config?.({} as never, { command: 'build', mode: 'production' } as never) as { define: Record<string, string> };
+    };
+    try {
+      expect(define(vendorRoot).define.__ASTRID_EDITOR_PACK_REVISIONS__).toBe('null');
+      writeFileSync(provenancePath, 'not json');
+      expect(define(vendorRoot).define.__ASTRID_EDITOR_PACK_REVISIONS__).toBe('null');
+      writeFileSync(provenancePath, JSON.stringify({ astrid_commit: 'invalid', files: { 'astrid/packs/video_editing/pack.yaml': 'hash' } }));
+      expect(define(vendorRoot).define.__ASTRID_EDITOR_PACK_REVISIONS__).toBe('null');
+      writeFileSync(provenancePath, JSON.stringify({ astrid_commit: commit, files: {
+        'astrid/packs/video_editing/pack.yaml': 'hash',
+        'astrid/packs/rendering/pack.yaml': 'hash',
+        'LICENSE': 'hash',
+      } }));
+      expect(define(alternate).define.__ASTRID_EDITOR_PACK_REVISIONS__).toBe('null');
+      const snapshot = createAppBuildPlugin({ appBuild: 'app', manifestPath, selectedCheckout: vendorRoot, vendorRoot });
+      writeFileSync(provenancePath, '{}');
+      const config = snapshot.config?.({} as never, { command: 'build', mode: 'production' } as never) as { define: Record<string, string> };
+      expect(JSON.parse(config.define.__ASTRID_EDITOR_PACK_REVISIONS__)).toEqual({ video_editing: commit });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('includes the owners of element modules bundled by the editor', () => {
+    const vendorRoot = path.resolve(__dirname, '../../vendor/astrid-browser');
+    const { astrid_commit: commit } = JSON.parse(readFileSync(path.join(vendorRoot, 'provenance.json'), 'utf8'));
+    expect(resolveEditorPackRevisions(vendorRoot, vendorRoot)).toMatchObject({
+      astrid_motion: commit,
+      rendering: commit,
+      local: commit,
+    });
+  });
+
+  it('captures the actual motion-pack upstream in the production build define', () => {
+    const vendorRoot = path.resolve(__dirname, '../../vendor/astrid-browser');
+    const directory = mkdtempSync(path.join(tmpdir(), 'astrid-motion-provenance-'));
+    const manifestPath = path.join(directory, 'manifest.json');
+    const { astrid_commit: commit } = JSON.parse(readFileSync(path.join(vendorRoot, 'provenance.json'), 'utf8'));
+    try {
+      writeFileSync(manifestPath, '{}');
+      const plugin = createAppBuildPlugin({ appBuild: 'app', manifestPath, selectedCheckout: vendorRoot, vendorRoot });
+      const config = plugin.config?.({} as never, { command: 'build', mode: 'production' } as never) as { define: Record<string, string> };
+      const revisions = JSON.parse(config.define.__ASTRID_EDITOR_PACK_REVISIONS__);
+      expect(commit).toMatch(/^[0-9a-f]{40}$/);
+      expect(revisions.astrid_motion).toBe(commit);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
 });

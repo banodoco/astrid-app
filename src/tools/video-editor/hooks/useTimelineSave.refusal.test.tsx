@@ -634,7 +634,7 @@ describe('useTimelineSave refused authoring edits', () => {
         await tick(500);
         await tick(30_000);
         expect(harness.hook.result.current.watchdogTripped).toBe(false);
-        await tick(2000);
+        await tick(120_000 - 30_000 - 500 + 1);
         expect(harness.hook.result.current.watchdogTripped).toBe(true);
         expect(harness.hook.result.current.saveBar).toMatchObject({ kind: 'waiting', action: 'watchdog' });
         stuck.open();

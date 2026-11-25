@@ -130,7 +130,7 @@
     "version": "0.3.1.dev0"
   },
   "required": {
-    "release": 14,
-    "reason": "This update fixes problems that could keep a rented machine billing after a job, or lose a finished result."
+    "release": 15,
+    "reason": "This update fixes renders that could fail on a fresh install, keeps large projects saving reliably, and makes updates and rollbacks safer."
   }
 }

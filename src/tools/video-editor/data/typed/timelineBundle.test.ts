@@ -209,3 +209,32 @@ describe('computeTimelineBundleDigest', () => {
     );
   });
 });
+
+describe('transcriptReferences optional mediaId/sourceId', () => {
+  const refs = (associations: Record<string, unknown>[]) => ({
+    schema: 'media.transcript.references/v1',
+    associations,
+  });
+  it('accepts and preserves optional mediaId/sourceId', () => {
+    const row = { assetId: 'a', documentId: 'd', mediaId: 'sha256:x', sourceId: 'whisper' };
+    const plain = { assetId: 'b', documentId: 'e' };
+    const parsed = parseTimelineBundle(makeEnvelope({ transcriptReferences: refs([row, plain]) }));
+    expect(parsed.transcriptReferences!.associations).toEqual([row, plain]);
+    expect(Object.keys(parsed.transcriptReferences!.associations[1])).not.toContain('mediaId');
+  });
+  it('still requires assetId and rejects unknown keys', () => {
+    expect(() => parseTimelineBundle(makeEnvelope({
+      transcriptReferences: refs([{ documentId: 'd', mediaId: 'm', sourceId: 's' }]),
+    }))).toThrow(/assetId/);
+    expect(() => parseTimelineBundle(makeEnvelope({
+      transcriptReferences: refs([{ assetId: 'a', documentId: 'd', extra: 1 }]),
+    }))).toThrow(/extra/);
+    expect(() => parseTimelineBundle(makeEnvelope({
+      transcriptReferences: refs([{ assetId: 'a', documentId: 'd', mediaId: '' }]),
+    }))).toThrow(TimelineBundleParseError);
+  });
+  it('still requires the envelope fields', () => {
+    expect(() => parseTimelineBundle({ transcriptReferences: refs([]) })).toThrow(/itemsBySchemaRef/);
+    expect(() => parseTimelineBundle({ itemsBySchemaRef: {} })).toThrow(/schema_version/);
+  });
+});

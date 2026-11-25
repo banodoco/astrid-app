@@ -611,11 +611,25 @@ export function createProjectTranscriptHost(
     const replaced = old.filter(
       (i) => i.sourceArtifactRef.assetId === assetId,
     ).length;
+    const previousRow = (data.transcriptReferences?.associations ?? []).find(
+      (r) => r.assetId === assetId,
+    );
     const associations = [
       ...(data.transcriptReferences?.associations ?? []).filter(
         (r) => r.assetId !== assetId,
       ),
-      { assetId, documentId: document.document_id },
+      {
+        assetId,
+        documentId: document.document_id,
+        // Keep the optional Agent-written ids only on a row that had them,
+        // refreshed to the newly selected document; never invent them.
+        ...(previousRow?.mediaId !== undefined
+          ? { mediaId: document.content.media_id }
+          : {}),
+        ...(previousRow?.sourceId !== undefined
+          ? { sourceId: document.content.source_id }
+          : {}),
+      },
     ];
     const projected = projectTranscriptItems(document, assetId);
     const config = reconcileTranscriptReferences(

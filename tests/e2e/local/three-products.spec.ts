@@ -2750,6 +2750,11 @@ test('M2 mixed editing: accepted pointer move and rename survive lost ACK, reloa
     conflicts: [expect.objectContaining({ kind: 'intervening_write', ref: 'parent/track:f2-mixed-independent' })] } });
   // The refusal response and its visible notice are observed before checking the wire and outbox state.
   await expect(page.getByText('Could not undo timeline')).toBeVisible(CEILING);
+  // The App names the refusal and makes no false claim: the rename stays displayed and nothing reads "Saved".
+  // Moved here from after the harness reads below (Release 15 Lead ruling, astrid-dev #1777 comment 7133033842):
+  // the toast auto-dismisses after 5 s, no user action happens in between, and the same refusal event is asserted.
+  await expect(page.getByText('conflict: an intervening publication wrote a guarded address')).toBeVisible();
+  await expect(page.getByText('Saved', { exact: true })).toHaveCount(0);
   const refusedOwner = (await commandOutboxes(page, seed3.timelineId))
     .find((owner) => owner.pending?.request.key === wire.posts[2].key)!;
   expect(refusedOwner.pending?.request).toEqual({ method: 'POST', path: `${timelineBase(harness, seed3)}/commit`,
@@ -2778,10 +2783,6 @@ test('M2 mixed editing: accepted pointer move and rename survive lost ACK, reloa
   expect(position(independent.data.canonical_document, seed3.appClipId)).toBe(to);
   await expectImmutableClosure(harness, seed3, independent);
   await expectAgentRevision(astrid, harness, seed3, pinOf(independent).revision_id);
-  // The App names the refusal and makes no false claim: the rename stays displayed and nothing reads "Saved".
-  await expect(page.getByText('Could not undo timeline')).toBeVisible(CEILING);
-  await expect(page.getByText('conflict: an intervening publication wrote a guarded address')).toBeVisible();
-  await expect(page.getByText('Saved', { exact: true })).toHaveCount(0);
   // REVIEW (#345): R13 showed the undo refusal inline only. R14 also opens the conflict dialog.
   const conflict = page.getByRole('alertdialog', { name: CONFLICT_TITLE });
   const useLatest = conflict.getByRole('button', { name: 'Use latest version' });

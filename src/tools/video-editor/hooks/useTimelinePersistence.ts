@@ -35,6 +35,7 @@ import {
   saveTimelineDraft,
 } from '@/tools/video-editor/data/timelineDraftIndexedDb.ts';
 import { recordShotTimelinePhase } from '@/tools/video-editor/lib/shot-timeline-timing.ts';
+import { recordTimelineSaveMark } from '@/tools/video-editor/lib/timeline-save-marks.ts';
 import { canonicalJsonStringify, type TimelineBundleEnvelope } from '@/tools/video-editor/data/typed/timelineBundle.ts';
 import type { AssetRegistry, TimelineConfig } from '@/tools/video-editor/types/index.ts';
 import type { CommitDataOptions, ScheduleSaveFn } from '@/tools/video-editor/hooks/useTimelineCommit.ts';
@@ -78,6 +79,8 @@ const SAVE_ERROR_RETRY_MAX_MS = 8_000;
  */
 const WATCHDOG_GRACE_MS =
   SAVE_DEBOUNCE_MS + BRIDGE_REQUEST_TIMEOUT_MS + 2 * SAVE_ERROR_RETRY_BASE_MS;
+// Only a still-live initial request may use this longer confirmation window.
+const WATCHDOG_LIVE_CEILING_MS = 120_000;
 
 type ConfigVersionUpdateSource = 'save' | 'reload';
 
@@ -345,6 +348,9 @@ export function useTimelinePersistence({
   const saveStatusRef = useRef<SaveStatus>('saved');
   const revertRefusedCaptureRef = useRef<(refused: ScheduledSave, restore: TimelineData, error: TimelineSaveError) => boolean>(() => false);
   const isSavingRef = useRef(false);
+  // Active attempts also include capture waits and lost-ACK inspection. Only
+  // an initial write awaiting its mutation result earns the live grace.
+  const liveRequestsRef = useRef(new Set<SaveAttempt>());
   const reloadInProgressRef = useRef(false);
   // Invalidates delayed queue continuations when a canonical reload begins.
   const saveQueueGenerationRef = useRef(0);
@@ -437,6 +443,7 @@ export function useTimelinePersistence({
   const [watchdogTripped, setWatchdogTripped] = useState(false);
   const [watchdogReason, setWatchdogReason] = useState<'timeout' | 'lost-edit' | null>(null);
   const watchdogTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const watchdogProgressAtRef = useRef(0);
   // Mirrors isConflictExhausted for the poll gate (usePollSync) — a diverged
   // timeline must not adopt remote data over local edits.
   const isConflictExhaustedRef = useRef(false);
@@ -492,6 +499,7 @@ export function useTimelinePersistence({
       attemptTimelineId,
       traceId,
       documentSave,
+      liveAttempt,
     }: {
       config: TimelineConfig;
       expectedVersion: number;
@@ -503,6 +511,7 @@ export function useTimelinePersistence({
       attemptProvider: DataProvider;
       attemptTimelineId: string;
       documentSave?: TimelinePersistenceHandoff;
+      liveAttempt?: SaveAttempt;
     }) => {
       attemptProvider.setShotTimelineTraceId?.(traceId);
       const saved: Promise<number | TimelineSaveReceipt> = documentSave ? documentSave.flush() : attemptProvider.saveTimelineAtHead
@@ -513,7 +522,13 @@ export function useTimelinePersistence({
       // Drop any cached resolved preview of THIS timeline used by a parent
       // composition's shot clips, so the next boundary crossing reloads the
       // freshly saved data instead of replaying a stale cached config.
-      void saved.then(() => invalidateReferencedTimelineCache(attemptProvider, attemptTimelineId)).catch(() => {});
+      if (liveAttempt) liveRequestsRef.current.add(liveAttempt);
+      void saved.then(() => {
+        if (liveAttempt) liveRequestsRef.current.delete(liveAttempt);
+        invalidateReferencedTimelineCache(attemptProvider, attemptTimelineId);
+      }, () => {
+        if (liveAttempt) liveRequestsRef.current.delete(liveAttempt);
+      }).catch(() => {});
       return saved;
     },
     retry: false,
@@ -584,9 +599,38 @@ export function useTimelinePersistence({
     }
   }, []);
 
+  const tripWatchdog = useCallback(() => {
+    disarmWatchdog();
+    setWatchdogTripped(true);
+  }, [disarmWatchdog]);
+
+  const startWatchdogWindow = useCallback(() => {
+    watchdogProgressAtRef.current = Date.now();
+    watchdogTimer.current = setTimeout(() => {
+      const owner = activeTargetRef.current;
+      const localStatus = owner.localDocumentSave?.status?.();
+      const remaining = WATCHDOG_LIVE_CEILING_MS - (Date.now() - watchdogProgressAtRef.current);
+      // A queued edit, capture wait, transport retry or known refusal is not
+      // evidence of a live commit. Never borrow liveness from another owner.
+      const live = isSavingRef.current && saveStatusRef.current !== 'error' && saveStatusRef.current !== 'retrying'
+        && !errorRetryTimer.current && errorRetryRef.current === 0
+        && !isConflictExhaustedRef.current && !isSchemaIncompatibleRef.current
+        && (localStatus === undefined || localStatus === 'saving')
+        && [...owner.activeAttempts].some(attempt =>
+          liveRequestsRef.current.has(attempt) && attempt.generation === owner.generation
+          && owner.uncertainThroughSeq < attempt.seq);
+      if (live && remaining > 0) {
+        watchdogTimer.current = setTimeout(tripWatchdog, remaining);
+      } else {
+        tripWatchdog();
+      }
+    }, WATCHDOG_GRACE_MS);
+  }, [tripWatchdog]);
+
   /**
    * Arm the write-ack watchdog: an edit exists that has no durable save
-   * receipt. If no ack arrives within the grace period the UI trips. A
+   * receipt. If no ack arrives within the grace period the UI trips unless
+   * a live request earns the longer ceiling. A
    * 'lost-edit' trips immediately (the edit was already dropped).
    */
   const armWatchdog = useCallback((reason: 'timeout' | 'lost-edit') => {
@@ -602,11 +646,8 @@ export function useTimelinePersistence({
     if (watchdogTimer.current) {
       return;
     }
-    watchdogTimer.current = setTimeout(() => {
-      watchdogTimer.current = null;
-      setWatchdogTripped(true);
-    }, WATCHDOG_GRACE_MS);
-  }, []);
+    startWatchdogWindow();
+  }, [startWatchdogWindow]);
 
   /**
    * An intent was accepted: the save is making progress. The watchdog measures time without progress, so a long
@@ -616,11 +657,8 @@ export function useTimelinePersistence({
   const noteSaveProgress = useCallback(() => {
     if (!watchdogTimer.current) return;
     clearTimeout(watchdogTimer.current);
-    watchdogTimer.current = setTimeout(() => {
-      watchdogTimer.current = null;
-      setWatchdogTripped(true);
-    }, WATCHDOG_GRACE_MS);
-  }, []);
+    startWatchdogWindow();
+  }, [startWatchdogWindow]);
 
 
   /** A save landed (or persistence is off): drop the pending retry and its backoff. */
@@ -778,6 +816,7 @@ export function useTimelinePersistence({
           stableSignature: scheduledOrAttempt.data.stableSignature,
         };
     let retryScheduled = false;
+    let requestFailed = false;
     if ((scheduledOrAttempt as Partial<ScheduledSave>).refusedAndReverted) return;
 
     if (!options?.bypassQueue) {
@@ -803,6 +842,7 @@ export function useTimelinePersistence({
           attemptTimelineId: attempt.timelineId,
           traceId: attempt.traceId,
           documentSave: attempt.session.localDocumentSave,
+          liveAttempt: options?.attemptKind === 'transport-retry' ? undefined : attempt,
         },
         {
           onSuccess: (receipt) => {
@@ -812,6 +852,7 @@ export function useTimelinePersistence({
             ) {
               return;
             }
+            recordTimelineSaveMark(attempt.traceId, '200');
             const nextVersion = typeof receipt === 'number' ? receipt : receipt.configVersion;
             if (typeof receipt !== 'number') headRevisionRef.current = receipt.head;
             if (typeof receipt === 'number' && nextVersion < configVersionRef.current) {
@@ -891,6 +932,8 @@ export function useTimelinePersistence({
         },
       );
     } catch (error) {
+      requestFailed = true;
+      liveRequestsRef.current.delete(attempt);
       recordDraftReloadFailure();
       // An obsolete request may settle after replacement/unmount. It cannot
       // reject a new session's waiters, update its state, or start a retry.
@@ -1030,7 +1073,16 @@ export function useTimelinePersistence({
         failSave(error instanceof Error ? error.message : String(error));
       }
     } finally {
+      attempt.provider.setShotTimelineTraceId?.(null);
+      liveRequestsRef.current.delete(attempt);
       attempt.session.activeAttempts.delete(attempt);
+      // If the live-only extension was earned and the request then fails,
+      // restore the original deadline rather than waiting out the ceiling.
+      // Terminal paths that already disarmed the watchdog retain their UI.
+      if (requestFailed && isMountedRef.current && activeTargetRef.current === attempt.session
+        && watchdogTimer.current && Date.now() - watchdogProgressAtRef.current >= WATCHDOG_GRACE_MS) {
+        tripWatchdog();
+      }
       if (!options?.bypassQueue) {
         isSavingRef.current = false;
 
@@ -1080,6 +1132,7 @@ export function useTimelinePersistence({
     savedSeqRef,
     scheduleErrorRetry,
     inspectLostAck,
+    tripWatchdog,
     provider,
     timelineId,
     resolveSaveDrainWaiters,
@@ -1650,6 +1703,7 @@ export function useTimelinePersistence({
       if (!deferred) {
         return;
       }
+      recordTimelineSaveMark(deferred.save.traceId, 'gesture-end');
       deferredSaveRef.current = null;
       scheduleSaveWithCapture(deferred.save.data, { preserveStatus: deferred.preserveStatus }, deferred.save);
     });

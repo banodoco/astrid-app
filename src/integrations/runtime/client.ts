@@ -990,8 +990,12 @@ export class AstridRuntimeClient {
     timelineId: string,
     request: CommitRequest,
     idempotencyKeyValue: string,
+    onRequestStart?: () => void,
   ): Promise<CommitAcceptedMutation | CommitPreviewResponse> {
-    return this.withMutation(() => this.client.commitTimeline(projectId, timelineId, request, idempotencyKeyValue));
+    return this.withMutation(() => {
+      onRequestStart?.();
+      return this.client.commitTimeline(projectId, timelineId, request, idempotencyKeyValue);
+    });
   }
 
   async listTimelineCommits(

@@ -321,3 +321,37 @@ admission and rendering require the Runtime's installed Remotion toolchain.
 To run `film-animation-contract.test.mjs`, set `SAVE_LOOP_TEST_PYTHON` to a
 Python interpreter with the Agent package installed (or importable through
 `PYTHONPATH`); it defaults to `python3`.
+
+### Per-row save timing marks and sweep deadlines (R15-Q-02)
+
+Every `type:"row"` JSONL record, including a failed/thrown row, now has
+`save_marks: {marks_available, saves}`. The harness snapshots the primary
+page's highest `astrid.save.<n>.*` counter at row entry, then reads the page's
+User Timing marks once after the row settles or fails. Only greater counters
+are included, sorted by `n`; prior rows and intervening cleanup saves are
+excluded. Each save has `n`, `gesture_end`, `post_sent`, `ok_200`, and
+`saved_badge`. Times are milliseconds from that save's gesture-end on the
+page's performance clock, rounded to 0.1 ms. Missing phases (or phases without
+a gesture-end origin) are `null`. For POST-to-200, subtract `post_sent` from
+`ok_200` only when both exist. The producer retains at most 16 saves per page.
+These marks are diagnostic evidence, not a change to the pass/fail rules.
+
+`marks_available:false, saves:[]` means the page exposed no recognized marks,
+or a trustworthy before/after read could not be obtained (each mark read has
+a 5 s best-effort limit). On an instrumented page that exposes only older
+marks, `marks_available:true, saves:[]` means no new counter was observed.
+The marks are from the primary editor page only, not the second clash page.
+
+Each row is bounded by its configured `timeoutMs`/`settle` (default 90 s)
+plus 30 s; cleanup is bounded by 120 s. The entire sweep, including startup
+and finalization, is bounded by `SAVE_LOOP_SWEEP_MAX_MS` (positive integer
+milliseconds, default `7200000`, two hours). Any row, cleanup, whole-sweep
+or final browser-close timeout appends a `type:"sweep_aborted"` record with
+`name`, `iteration` (both null if outside a row), `bound`, `limit_ms`
+and `elapsed_ms` for the breached wait. If the current row has not already
+been recorded, its failed row is appended with a best-effort mark snapshot.
+The owned browser is closed with a 10 s limit, and the process exits 1 even
+if an abandoned page promise never settles. SIGINT and SIGTERM retain their
+existing exit codes and use the bounded close. Aborted rows are not retried.
+
+Browser-free unit proof: `node --test scripts/save-loop/*.test.mjs`.

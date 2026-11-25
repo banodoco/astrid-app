@@ -73,10 +73,12 @@ export async function open({onCleanup, fixture, onOpening, reducedOpening = fals
   checkDisk();
   const browserScratch=fs.mkdtempSync(path.join('/tmp','sl-'));
   const profile=browserScratch;
-  let proc, browser, cpu;
-  async function close(){
-    cpu?.close();
+  let proc, browser, cpu, closePromise;
+  // Startup failure, signals and the sweep watchdog may all request close.
+  function close(){ return closePromise ??= closeOwned(); }
+  async function closeOwned(){
     try {
+      cpu?.close();
       if (browser) {
         await Promise.race([
           Promise.resolve().then(() => browser.close()).catch(() => {}),

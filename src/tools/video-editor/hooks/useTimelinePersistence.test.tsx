@@ -25,6 +25,7 @@ import { useTimelineOps } from './useTimelineOps';
 import { useEditorBrowserDefaults } from './useEditorBrowserDefaults';
 import { resetDraftReloadGuardsForTest, useGuardedReload } from '@/shared/lib/updates/draftSafeReload.ts';
 import { RuntimeDataProvider } from '@/integrations/runtime/dataProvider.ts';
+import { ApiError } from '@/integrations/runtime/generated.ts';
 import { PROJECT_ID, TIMELINE_ID, json, runtimeFixture } from '@/test/fakeWorkspaceRuntime.ts';
 import { TimelineEventBus } from './useTimelineEventBus';
 import {
@@ -2664,7 +2665,7 @@ describe('useTimelinePersistence — write-ack watchdog', () => {
     expect(harness.saveTimeline).toHaveBeenCalledTimes(1);
   });
 
-  it('a late accepted local commit clears the watchdog through the real handoff and saveSuccess', async () => {
+  async function exerciseLocalCommitAfterLiveGrace(outcome: 'accepted' | 'conflict' | 'lost-ack') {
     const original = makeTimelineData('heavy-local-save');
     original.head = { projectId: 'project-commit', timelineId: 'timeline-1', headRevisionId: 'r0', headPublicationId: 'p0' };
     const document = acceptedCommit({ revision_id: 'r0', publication_id: 'p0' }, { revision_id: 'r0', publication_id: 'p0' },
@@ -2683,6 +2684,7 @@ describe('useTimelinePersistence — write-ack watchdog', () => {
     // (which can carry own undefined fields such as pinnedShotGroups).
     // Apply the authored move to the verified raw document, as the commit does.
     for (const list of [landed.parent_revision.payload.clips, landed.parent_revision.payload.config.clips]) {
+      if (!Array.isArray(list)) throw new Error('Expected canonical parent clip mirror in fixture');
       for (const clip of list as Array<Record<string, unknown>>) {
         if (clip.id === original.config.clips[0].id) clip.at = 5;
       }
@@ -2701,8 +2703,12 @@ describe('useTimelinePersistence — write-ack watchdog', () => {
     let markStarted!: () => void;
     const started = new Promise<void>(resolve => { markStarted = resolve; });
     let finishSend!: () => void;
-    const send = vi.fn<NonNullable<DataProvider['commitTimeline']>>(() => new Promise(resolve => {
-      finishSend = () => resolve(commitResult);
+    const send = vi.fn<NonNullable<DataProvider['commitTimeline']>>(() => new Promise((resolve, reject) => {
+      finishSend = () => {
+        if (outcome === 'conflict') reject(new ApiError(409, 'conflict', 'Retain original intent', '', { status: 'conflict' }));
+        else if (outcome === 'lost-ack') reject(new Error('Lost acknowledgement'));
+        else resolve(commitResult);
+      };
       markStarted();
     }));
     let progress: (() => void) | undefined;
@@ -2754,6 +2760,32 @@ describe('useTimelinePersistence — write-ack watchdog', () => {
       expect(harness.result.current.saveStatus).toBe('saving');
       expect(harness.result.current.watchdogTripped).toBe(false);
       expect(bar()).toBeNull();
+      if (outcome !== 'accepted') {
+        // A request that earned the live extension is no longer live once
+        // Runtime refuses it or its acknowledgement is lost. Do not advance
+        // another timer: the existing failure surface must win immediately.
+        const [request, key] = send.mock.calls[0];
+        await act(async () => {
+          finishSend();
+          await expect(flushed).rejects.toThrow();
+        });
+        expect(local.getState().status).toBe(outcome === 'conflict' ? 'conflict' : 'retry');
+        expect(harness.result.current.saveStatus).toBe(outcome === 'conflict' ? 'error' : 'retrying');
+        expect(harness.result.current.watchdogTripped).toBe(true);
+        expect(bar()).toMatchObject(outcome === 'conflict'
+          ? { kind: 'refused', action: 'local' }
+          : { kind: 'waiting', action: 'local' });
+        const [stored] = await outboxes.list(scope);
+        expect(stored.accepted).toBeUndefined();
+        expect(stored.intents).toHaveLength(1);
+        expect(stored.pending?.outcome?.kind).toBe(outcome === 'conflict' ? 'rejected' : 'retry');
+        expect(stored.pending?.request.key).toBe(key);
+        expect(JSON.parse(stored.pending!.request.body)).toEqual(request);
+        expect(harness.savedSeqRef.current).toBe(0);
+        expect(success).not.toHaveBeenCalled();
+        expect(send).toHaveBeenCalledTimes(1);
+        return;
+      }
       await advance(WATCHDOG_LIVE_CEILING_MS - 100_000);
       expect(harness.result.current.watchdogTripped).toBe(true);
       expect(bar()).toMatchObject({ action: 'watchdog', headline: 'The save has not been confirmed. Your changes are kept.' });
@@ -2785,6 +2817,18 @@ describe('useTimelinePersistence — write-ack watchdog', () => {
       await local.dispose();
       contractFixture.digest = 'sha256:unsupported-test-fixture';
     }
+  }
+
+  it('a late accepted local commit clears the watchdog through the real handoff and saveSuccess', async () => {
+    await exerciseLocalCommitAfterLiveGrace('accepted');
+  });
+
+  it('a late local 409 refusal immediately replaces live grace and retains the exact intent', async () => {
+    await exerciseLocalCommitAfterLiveGrace('conflict');
+  });
+
+  it('a late local lost acknowledgement immediately replaces live grace and retains the exact request', async () => {
+    await exerciseLocalCommitAfterLiveGrace('lost-ack');
   });
 
   it('does NOT trip when a slow-but-valid save ACKs just inside the bridge request window', async () => {

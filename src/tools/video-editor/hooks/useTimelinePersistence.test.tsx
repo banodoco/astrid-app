@@ -18,6 +18,7 @@ vi.mock('@/tools/video-editor/data/timelineDraftIndexedDb.ts', async (importOrig
   return { ...actual, saveTimelineDraft: vi.fn(actual.saveTimelineDraft) };
 });
 import { useTimelinePersistence, TimelineSaveBarrierError, type UseTimelinePersistenceResult } from './useTimelinePersistence';
+import { saveBarInput } from './saveBar.ts';
 import { useClipEditing } from './useClipEditing';
 import { useTimelineCommit } from './useTimelineCommit';
 import { useTimelineOps } from './useTimelineOps';
@@ -73,6 +74,7 @@ vi.mock('@/integrations/runtime/generated-contract-metadata.ts', async (importOr
 const SAVE_DEBOUNCE_MS = 500;
 const SAVE_ERROR_RETRY_BASE_MS = 500;
 const WATCHDOG_GRACE_MS = SAVE_DEBOUNCE_MS + BRIDGE_REQUEST_TIMEOUT_MS + 2 * SAVE_ERROR_RETRY_BASE_MS;
+const WATCHDOG_LIVE_CEILING_MS = 120_000;
 
 function makeRegistry(label: string): AssetRegistry {
   return {
@@ -2579,9 +2581,15 @@ describe('useTimelinePersistence — write-ack watchdog', () => {
     await advance(600); // debounce fires, save hangs
     expect(harness.saveTimeline).toHaveBeenCalledTimes(1);
 
-    await advance(WATCHDOG_GRACE_MS - 600 - 1); // Just before the deadline, including the elapsed debounce.
+    await advance(WATCHDOG_GRACE_MS - 600);
+    expect(harness.result.current.saveStatus).toBe('saving');
+    expect(harness.result.current.watchdogTripped).toBe(false);
+    await advance(100_000 - WATCHDOG_GRACE_MS);
+    expect(harness.result.current.saveStatus).toBe('saving');
+    expect(harness.result.current.watchdogTripped).toBe(false);
+    await advance(WATCHDOG_LIVE_CEILING_MS - 100_000 - 1);
     expect(harness.result?.current.watchdogTripped).toBe(false);
-    await advance(2); // Past the computed deadline, trips.
+    await advance(1); // Exactly 120 s since scheduling, including debounce.
     expect(harness.result?.current.watchdogTripped).toBe(true);
   });
 
@@ -2592,11 +2600,171 @@ describe('useTimelinePersistence — write-ack watchdog', () => {
     });
 
     harness.scheduleSave(makeTimelineData('hang'));
-    await advance(WATCHDOG_GRACE_MS + 1);
+    await advance(600); // Start the request before advancing to the live ceiling.
+    expect(harness.saveTimeline).toHaveBeenCalledTimes(1);
+    await advance(WATCHDOG_LIVE_CEILING_MS - 600);
     expect(harness.result?.current.watchdogTripped).toBe(true);
 
     act(() => { harness.eventBus.emit('saveSuccess'); });
     expect(harness.result?.current.watchdogTripped).toBe(false);
+  });
+
+  it('restarts the live ceiling from the most recent accepted intent', async () => {
+    const harness = setup({
+      persistenceEnabled: true,
+      saveTimelineImpl: () => new Promise<number>(() => {}),
+    });
+    harness.scheduleSave(makeTimelineData('progress'));
+    await advance(600);
+    expect(harness.saveTimeline).toHaveBeenCalledTimes(1);
+    await advance(100_000 - 600);
+    act(() => { harness.result.current.noteSaveProgress(); });
+
+    await advance(WATCHDOG_LIVE_CEILING_MS - 1);
+    expect(harness.result.current.saveStatus).toBe('saving');
+    expect(harness.result.current.watchdogTripped).toBe(false);
+    await advance(1);
+    expect(harness.result.current.watchdogTripped).toBe(true);
+    expect(harness.result.current.watchdogReason).toBe('timeout');
+  });
+
+  it('does not extend grace for a capture that has not started a request', async () => {
+    const handoff = {
+      capture: vi.fn(() => new Promise<void>(() => {})),
+      flush: vi.fn(),
+      remoteHistoryAvailable: () => false, canUndo: () => false, canRedo: () => false,
+      undo: vi.fn(), redo: vi.fn(),
+    } satisfies TimelineLocalSaveHandoff;
+    const harness = setup({ persistenceEnabled: true, localDocumentSave: handoff });
+    harness.scheduleSave(makeTimelineData('capture-stalled'));
+    await advance(600);
+    expect(handoff.capture).toHaveBeenCalledTimes(1);
+    expect(handoff.flush).not.toHaveBeenCalled();
+    await advance(WATCHDOG_GRACE_MS - 600);
+    expect(harness.result.current.watchdogTripped).toBe(true);
+    expect(harness.result.current.watchdogReason).toBe('timeout');
+    expect(handoff.flush).not.toHaveBeenCalled();
+  });
+
+  it('revokes the live extension when a transport failure becomes known', async () => {
+    let fail!: (error: Error) => void;
+    const harness = setup({
+      persistenceEnabled: true,
+      saveTimelineImpl: () => new Promise<number>((_resolve, reject) => { fail = reject; }),
+    });
+    harness.scheduleSave(makeTimelineData('late-transport-failure'));
+    await advance(600);
+    expect(harness.saveTimeline).toHaveBeenCalledTimes(1);
+    await advance(100_000 - 600);
+    expect(harness.result.current.watchdogTripped).toBe(false);
+    act(() => { fail(new Error('connection lost')); });
+    await advance(0);
+    expect(harness.result.current.saveStatus).toBe('retrying');
+    expect(harness.result.current.watchdogTripped).toBe(true);
+    expect(harness.saveTimeline).toHaveBeenCalledTimes(1);
+  });
+
+  it('a late accepted local commit clears the watchdog through the real handoff and saveSuccess', async () => {
+    const original = makeTimelineData('heavy-local-save');
+    original.head = { projectId: 'project-commit', timelineId: 'timeline-1', headRevisionId: 'r0', headPublicationId: 'p0' };
+    const document = acceptedCommit({ revision_id: 'r0', publication_id: 'p0' }, { revision_id: 'r0', publication_id: 'p0' },
+      { timelineId: 'timeline-1' }).data.canonical_document;
+    document.parent_revision.payload = { ...document.parent_revision.payload,
+      config: structuredClone(original.config), clips: structuredClone(original.config.clips),
+      registry: structuredClone(original.registry), opaque: { keep: null } };
+    document.parent_revision.content_digest = fixtureDigest(document.parent_revision.payload);
+    const initial = { head: { revisionId: 'r0', publicationId: 'p0' }, canonicalDocument: document };
+    const scope = { realmId: 'realm', actorId: 'actor', projectId: 'project-commit', timelineId: 'timeline-1' };
+    const outboxes = createCommitOutbox({ indexedDB: createFakeIndexedDB(), exclusiveLock: async (_key, work) => work() });
+    const edited = buildDataFromCurrentRegistry({ ...original.config,
+      clips: original.config.clips.map(clip => ({ ...clip, at: 5 })) }, original);
+    const landed = structuredClone(document);
+    landed.parent_revision.payload.config = structuredClone(edited.config);
+    landed.parent_revision.payload.clips = structuredClone(edited.config.clips);
+    landed.parent_revision.revision_id = 'r1';
+    landed.parent_revision.content_digest = fixtureDigest(landed.parent_revision.payload);
+    const response = acceptedCommit({ revision_id: 'r1', publication_id: 'p1' }, { revision_id: 'r0', publication_id: 'p0' },
+      { timelineId: 'timeline-1' });
+    response.data.canonical_document = landed;
+    let markStarted!: () => void;
+    const started = new Promise<void>(resolve => { markStarted = resolve; });
+    let finishSend!: () => void;
+    const send = vi.fn<NonNullable<DataProvider['commitTimeline']>>(() => new Promise(resolve => {
+      finishSend = () => resolve({ response, accepted: { revisionId: 'r1', publicationId: 'p1' },
+        canonicalDocument: landed, graph: {}, receipt: response.receipt });
+      markStarted();
+    }));
+    let progress: (() => void) | undefined;
+    const local = await createLocalSaveSession({ scope, initial, document: toOutboxJson(document), outboxes, send,
+      loadLatest: vi.fn(async () => initial), changed: vi.fn(), progress: () => progress?.(),
+      prepareDisplay: async basis => ({ document: toOutboxJson(basis.canonicalDocument), adopt: vi.fn() }) });
+    const nextHead = { ...original.head, headRevisionId: 'r1', headPublicationId: 'p1' };
+    const handoff = {
+      ...createTimelineLocalSaveHandoff({ initial, source: { config: original.config, registry: original.registry, head: original.head },
+        session: local, adopted: () => ({ receipt: { configVersion: 2, head: nextHead },
+          source: { config: edited.config, registry: edited.registry, head: nextHead } }) }),
+      status: () => local.getState().status,
+    };
+    const harness = setup({ initialData: original, localDocumentSave: handoff });
+    harness.provider.commitTimeline = send;
+    progress = () => harness.result.current.noteSaveProgress();
+    const success = vi.fn();
+    const offSuccess = harness.eventBus.on('saveSuccess', success);
+    const bar = () => saveBarInput({ local: local.getState(), bootstrapFailed: false, recoveryDraft: null,
+      conflictExhausted: harness.result.current.isConflictExhausted, schemaIncompatible: Boolean(harness.result.current.schemaIncompatible),
+      watchdogTripped: harness.result.current.watchdogTripped, saveError: harness.result.current.saveError });
+    try {
+      contractFixture.digest = (await vi.importActual<typeof import('@/integrations/runtime/generated-contract-metadata.ts')>('@/integrations/runtime/generated-contract-metadata.ts')).SCHEMA_DIGEST;
+      const since = Date.now();
+      act(() => {
+        harness.dataRef.current = edited;
+        harness.result.current.scheduleSave(edited, { gestureBasis: { kind: 'move', clipId: original.config.clips[0].id,
+          trackId: 'V1', config: original.config, registry: original.registry } });
+      });
+      let flushed!: Promise<number>;
+      await act(async () => {
+        flushed = harness.result.current.flushPendingSave();
+        // Fail promptly if authoring/dispatch refuses instead of starting.
+        await Promise.race([started, flushed]);
+      });
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(local.getState().status).toBe('saving');
+      expect(harness.saveTimeline).not.toHaveBeenCalled();
+
+      await advance(WATCHDOG_GRACE_MS - (Date.now() - since));
+      expect(harness.result.current.saveStatus).toBe('saving');
+      expect(harness.result.current.watchdogTripped).toBe(false);
+      expect(bar()).toBeNull();
+      await advance(100_000 - WATCHDOG_GRACE_MS);
+      expect(harness.result.current.saveStatus).toBe('saving');
+      expect(harness.result.current.watchdogTripped).toBe(false);
+      expect(bar()).toBeNull();
+      await advance(WATCHDOG_LIVE_CEILING_MS - 100_000);
+      expect(harness.result.current.watchdogTripped).toBe(true);
+      expect(bar()).toMatchObject({ action: 'watchdog', headline: 'The save has not been confirmed. Your changes are kept.' });
+      expect(success).not.toHaveBeenCalled();
+
+      await act(async () => {
+        finishSend();
+        await expect(flushed).resolves.toBe(2);
+      });
+      expect(success).toHaveBeenCalledTimes(1);
+      expect(local.getState().status).toBe('saved');
+      expect(harness.result.current.saveStatus).toBe('saved');
+      expect(harness.result.current.watchdogTripped).toBe(false);
+      expect(bar()).toBeNull();
+      expect(send).toHaveBeenCalledTimes(1);
+      expect((await outboxes.list(scope))[0].accepted).toBeTruthy();
+      await advance(WATCHDOG_LIVE_CEILING_MS);
+      expect(harness.result.current.watchdogTripped).toBe(false);
+    } finally {
+      // Never leave the local pump waiting for the test's controlled response.
+      finishSend?.();
+      offSuccess();
+      harness.unmount();
+      await local.dispose();
+      contractFixture.digest = 'sha256:unsupported-test-fixture';
+    }
   });
 
   it('does NOT trip when a slow-but-valid save ACKs just inside the bridge request window', async () => {
@@ -2783,11 +2951,11 @@ describe('useTimelinePersistence — write-ack watchdog', () => {
     expect(harness.result?.current.saveStatus).toBe('saving');
     expect(harness.result?.current.watchdogTripped).toBe(false);
 
-    // Nothing else cleared the watchdog: it trips once B goes unacknowledged
-    // past the grace from when save A was scheduled.
-    await advance(WATCHDOG_GRACE_MS - 600 - 1); // Just before the deadline.
+    // Nothing else cleared the watchdog: it trips once live B goes
+    // unacknowledged past the live ceiling from when save A was scheduled.
+    await advance(WATCHDOG_LIVE_CEILING_MS - 600 - 1); // Just before the deadline.
     expect(harness.result?.current.watchdogTripped).toBe(false);
-    await advance(2); // Past the deadline, trips.
+    await advance(1); // At the deadline, trips.
     expect(harness.result?.current.watchdogTripped).toBe(true);
     expect(harness.result?.current.watchdogReason).toBe('timeout');
 

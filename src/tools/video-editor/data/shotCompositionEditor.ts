@@ -158,15 +158,19 @@ function remapIndependentInternalTimeline(value: unknown, prefix: string): JsonO
   const internal = clone(value as JsonObject);
   const timeline = record(internal.timeline);
   if (!timeline || !Array.isArray(timeline.clips)) return internal;
-  internal.timeline = {
-    ...timeline,
-    clips: timeline.clips.map((clip) => {
+  const remapClipIds = (source: JsonObject) => ({
+    ...source,
+    clips: (source.clips as unknown[]).map((clip) => {
       const row = record(clip);
       return row && typeof row.id === 'string'
         ? {...row, id: `${prefix}:${row.id}`}
         : clip;
     }),
-  };
+  });
+  internal.timeline = remapClipIds(timeline);
+  // Keep read-normalized clip starts paired with their renamed save basis.
+  const stored = record(internal.rawJson);
+  if (stored && Array.isArray(stored.clips)) internal.rawJson = remapClipIds(stored);
   return internal;
 }
 

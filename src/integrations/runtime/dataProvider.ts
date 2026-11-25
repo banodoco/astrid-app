@@ -2534,7 +2534,6 @@ function runtimeGraphToContract(
   }
   const headRevisionId = requiredString(parent.revision_id, 'parent composition revision.revision_id');
   const parentConfig = asRecord(parentPayload.config);
-  canonicalParentClips(parentPayload, parentConfig ?? {});
   const parentGraph = {
     ...parentPayload,
     ...(Array.isArray(parentPayload.clips) ? { clips: normalizedStoredClipStarts(parentPayload.clips) } : {}),

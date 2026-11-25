@@ -3002,7 +3002,7 @@ describe('useTimelinePersistence — write-ack watchdog', () => {
     harness.scheduleSave(makeTimelineData('hang'));
     await advance(600);
     expect(harness.saveTimeline).toHaveBeenCalledTimes(1);
-    await advance(WATCHDOG_GRACE_MS + 1);
+    await advance(WATCHDOG_LIVE_CEILING_MS - 600 + 1);
     expect(harness.result?.current.watchdogTripped).toBe(true);
 
     // Retry while the original save is still in flight: the notice clears and

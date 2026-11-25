@@ -121,12 +121,14 @@ describe('Release 14 clip and placement at_ms read compatibility', () => {
     },
   );
 
-  it('compares duplicate canonical clip authorities before rounding them', () => {
+  it('compares duplicate canonical clip authorities before rounding them', async () => {
     const document = release14Document();
     const parent = document.parent_revision.payload as Row;
     clipsOf(parent.config as Row)[0].at_ms = 4267;
     document.parent_revision.content_digest = fixtureDigest(parent);
-    expect(() => graphOf(document)).toThrow('canonical parent clips and config.clips disagree');
+    const fixture = runtimeFixture({ parentComposition: parent });
+    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: fixture.transport });
+    await expect(provider.loadTimeline(TIMELINE_ID)).rejects.toThrow('canonical parent clips and config.clips disagree');
   });
 
   it('does not round an untouched parent clip into a full publication', async () => {

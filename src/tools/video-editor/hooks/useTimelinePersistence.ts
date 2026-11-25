@@ -499,6 +499,7 @@ export function useTimelinePersistence({
       attemptTimelineId,
       traceId,
       documentSave,
+      liveAttempt,
     }: {
       config: TimelineConfig;
       expectedVersion: number;
@@ -510,6 +511,7 @@ export function useTimelinePersistence({
       attemptProvider: DataProvider;
       attemptTimelineId: string;
       documentSave?: TimelinePersistenceHandoff;
+      liveAttempt?: SaveAttempt;
     }) => {
       attemptProvider.setShotTimelineTraceId?.(traceId);
       const saved: Promise<number | TimelineSaveReceipt> = documentSave ? documentSave.flush() : attemptProvider.saveTimelineAtHead
@@ -520,7 +522,13 @@ export function useTimelinePersistence({
       // Drop any cached resolved preview of THIS timeline used by a parent
       // composition's shot clips, so the next boundary crossing reloads the
       // freshly saved data instead of replaying a stale cached config.
-      void saved.then(() => invalidateReferencedTimelineCache(attemptProvider, attemptTimelineId)).catch(() => {});
+      if (liveAttempt) liveRequestsRef.current.add(liveAttempt);
+      void saved.then(() => {
+        if (liveAttempt) liveRequestsRef.current.delete(liveAttempt);
+        invalidateReferencedTimelineCache(attemptProvider, attemptTimelineId);
+      }, () => {
+        if (liveAttempt) liveRequestsRef.current.delete(liveAttempt);
+      }).catch(() => {});
       return saved;
     },
     retry: false,
@@ -604,7 +612,7 @@ export function useTimelinePersistence({
       const remaining = WATCHDOG_LIVE_CEILING_MS - (Date.now() - watchdogProgressAtRef.current);
       // A queued edit, capture wait, transport retry or known refusal is not
       // evidence of a live commit. Never borrow liveness from another owner.
-      const live = isSavingRef.current && saveStatusRef.current === 'saving'
+      const live = isSavingRef.current && saveStatusRef.current !== 'error' && saveStatusRef.current !== 'retrying'
         && !errorRetryTimer.current && errorRetryRef.current === 0
         && !isConflictExhaustedRef.current && !isSchemaIncompatibleRef.current
         && (localStatus === undefined || localStatus === 'saving')
@@ -823,7 +831,6 @@ export function useTimelinePersistence({
       if (attempt.session.captureFailure) throw attempt.session.captureFailure;
       if ((scheduledOrAttempt as Partial<ScheduledSave>).refusedAndReverted) return;
       await attempt.localCapture;
-      if (options?.attemptKind !== 'transport-retry') liveRequestsRef.current.add(attempt);
       await saveMutation.mutateAsync(
         {
           config: attempt.config,
@@ -835,6 +842,7 @@ export function useTimelinePersistence({
           attemptTimelineId: attempt.timelineId,
           traceId: attempt.traceId,
           documentSave: attempt.session.localDocumentSave,
+          liveAttempt: options?.attemptKind === 'transport-retry' ? undefined : attempt,
         },
         {
           onSuccess: (receipt) => {

@@ -1,4 +1,4 @@
-import type {ComponentCapabilityContext, PreparedComponentCapability} from '@banodoco/timeline-composition/evaluation';
+import type {ComponentCapabilityContext, PreparedComponentCapability} from '@astrid-rendering/shared/element_contracts';
 import type {ElementComponentProps} from '@astrid-rendering/shared/element_contracts';
 import {clipFrames, narrowParams} from '../../_shared/am';
 import {mosaicBlockAt, type MosaicRamp} from '../../_shared/mosaic';

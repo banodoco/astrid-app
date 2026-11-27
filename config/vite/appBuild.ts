@@ -47,9 +47,12 @@ export function resolveEditorPackRevisions(selectedCheckout?: string, vendorRoot
     const revisions = Object.fromEntries([...packIds].map((id) => [id, commit]));
     if (packIds.has('astrid_motion')) {
       const digest = verifyMotionProjection(vendorRoot, provenance);
-      // Preserve the existing upstream commit as provenance. The additive
-      // field is the content identity compared by the render host.
-      if (digest) revisions.astrid_motion_tree = digest;
+      // Motion can come directly from poms while other packs retain the
+      // vendor baseline's Agent origin. Read this only after verification.
+      if (digest) {
+        revisions.astrid_motion = (provenance as { motion_projection: { upstream_commit: string } }).motion_projection.upstream_commit;
+        revisions.astrid_motion_tree = digest;
+      }
     }
     return revisions;
   } catch {

@@ -1920,7 +1920,7 @@ export const ASTRID_ELEMENT_CATALOG: readonly AstridRenderingElementDescriptor[]
       "preview": "unknown",
       "workerExport": "unknown"
     },
-    "revision": "sha256:eb4702c226ad57c71bb99818e816576efe891f2cf6d5bdae85c095c0da69d590",
+    "revision": "sha256:c1f509390451dad4e3616c192a5fa530e1cb2928532fbcf281ce3dacf8747658",
     "runtime": {},
     "schema": {
       "additionalProperties": true,
@@ -2795,7 +2795,7 @@ export const ASTRID_ELEMENT_CATALOG: readonly AstridRenderingElementDescriptor[]
       "preview": "unknown",
       "workerExport": "unknown"
     },
-    "revision": "sha256:01045dd31ca0502749a1f8005c08a41dd51e8494bb2a64bfb17eea9a658bee66",
+    "revision": "sha256:e16970c205ca90f733560a68993caf60c34a69eb1c6bd94a0b0d90be1976e235",
     "runtime": {},
     "schema": {
       "additionalProperties": true,
@@ -3326,7 +3326,7 @@ export const ASTRID_ELEMENT_CATALOG: readonly AstridRenderingElementDescriptor[]
       "preview": "unknown",
       "workerExport": "unknown"
     },
-    "revision": "sha256:86f2233a7fb59b62dcdb4db2d7f9a88c0253dd03e8bb5257fb1785670b2fb5a6",
+    "revision": "sha256:5dbbb93bde39b2d53a23ae45cd1e3de0a6292e2e9b57412aa3601313df045f6c",
     "runtime": {},
     "schema": {
       "additionalProperties": true,
@@ -3533,6 +3533,14 @@ export const ASTRID_ELEMENT_CATALOG: readonly AstridRenderingElementDescriptor[]
         "type": "boolean"
       },
       {
+        "description": "Internal source frame offset used by a cut sprite piece.",
+        "label": "Frame Offset",
+        "max": 10000000,
+        "min": 0,
+        "name": "frameOffset",
+        "type": "number"
+      },
+      {
         "default": 6,
         "description": "Screen px per art (logical) px.",
         "label": "Scale",
@@ -3601,7 +3609,7 @@ export const ASTRID_ELEMENT_CATALOG: readonly AstridRenderingElementDescriptor[]
       "preview": "unknown",
       "workerExport": "unknown"
     },
-    "revision": "sha256:e0a917b595a57b564bbc15c8dd8c0a73cd5164151c389d27c0a70393ab335008",
+    "revision": "sha256:562d40b8dcf6c66c076d92c5acc0b8d630426737c1c3a1e00aeefc9ef48b3344",
     "runtime": {},
     "schema": {
       "additionalProperties": true,
@@ -3637,6 +3645,12 @@ export const ASTRID_ELEMENT_CATALOG: readonly AstridRenderingElementDescriptor[]
         },
         "flipX": {
           "type": "boolean"
+        },
+        "frameOffset": {
+          "description": "Internal source frame offset used by a cut sprite piece.",
+          "maximum": 10000000,
+          "minimum": 0,
+          "type": "integer"
         },
         "frames": {
           "description": "Horizontal sprite strip. Frames advance at fps, quantised to clip frames.",
@@ -3685,9 +3699,7 @@ export const ASTRID_ELEMENT_CATALOG: readonly AstridRenderingElementDescriptor[]
               }
             },
             "required": [
-              "frame",
-              "x",
-              "y"
+              "frame"
             ],
             "type": "object"
           },
@@ -3719,6 +3731,24 @@ export const ASTRID_ELEMENT_CATALOG: readonly AstridRenderingElementDescriptor[]
             "bottom"
           ],
           "type": "string"
+        },
+        "sourceClock": {
+          "description": "Internal source frame clock for a sprite cut at a chapter boundary.",
+          "properties": {
+            "offsetFrames": {
+              "minimum": 0,
+              "type": "number"
+            },
+            "speed": {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            }
+          },
+          "required": [
+            "offsetFrames",
+            "speed"
+          ],
+          "type": "object"
         },
         "src": {
           "description": "Static URL or public path. Leave empty and use clip.asset for managed media.",
@@ -3995,7 +4025,7 @@ export const ASTRID_ELEMENT_CATALOG: readonly AstridRenderingElementDescriptor[]
     "componentPath": "packs/astrid_motion/rendering/elements/effects/am-type/component.tsx",
     "defaults": {
       "align": "left",
-      "color": "#25241F",
+      "color": "#FAFAFA",
       "font": "display",
       "lineHeight": 0.95,
       "reveal": "slideUp",
@@ -4135,7 +4165,7 @@ export const ASTRID_ELEMENT_CATALOG: readonly AstridRenderingElementDescriptor[]
       "preview": "unknown",
       "workerExport": "unknown"
     },
-    "revision": "sha256:b84cab70114f2a3bdf5400ee692fb5cc1fdf03dda84894712f962148d0e3a8a4",
+    "revision": "sha256:98ea9ab4149757e32a609165f74e898718a24900787e50a8327cfd9f47652be7",
     "runtime": {},
     "schema": {
       "additionalProperties": true,

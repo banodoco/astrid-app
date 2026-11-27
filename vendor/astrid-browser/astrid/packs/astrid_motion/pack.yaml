@@ -1,8 +1,8 @@
 {
   "schema_version": 3,
   "pack_api": "2.0",
-  "dependencies": {"python_requirements": ["Pillow"]},
   "id": "astrid_motion",
+  "dependencies": {"python_requirements": ["Pillow"]},
   "name": "Astrid Motion Pack",
   "version": "0.1.0",
   "status": "experimental",
@@ -28,6 +28,20 @@
   "documentation": {
     "kind": "skill",
     "path": "docs/SKILL.md"
+  },
+  "extensions": {
+    "astrid": {
+      "generation_availability": {
+        "fixture_only_routes": {
+          "astrid_motion:preview/scenes.json": true,
+          "astrid_motion:preview/render.mjs": true,
+          "astrid_motion:preview/make_art.py": true,
+          "astrid_motion:preview/src/Preview.tsx": true,
+          "astrid_motion:preview/src/Root.tsx": true,
+          "astrid_motion:preview/src/index.ts": true
+        }
+      }
+    }
   },
   "agent": {
     "purpose": "Use when a timeline needs a Pixel Modernism motion building block such as pixel plates, stepped transparent sprites, editorial type, floating callouts, or pixel-block wipes.",
@@ -204,6 +218,10 @@
         {
           "kind": "implementation",
           "path": "rendering/elements/effects/am-footage/scene.ts"
+        },
+        {
+          "kind": "implementation",
+          "path": "rendering/elements/effects/am-footage/volume.ts"
         },
         {
           "kind": "implementation",
@@ -388,6 +406,14 @@
         {
           "kind": "implementation",
           "path": "rendering/elements/effects/am-snap-plate/motion.ts"
+        },
+        {
+          "kind": "implementation",
+          "path": "rendering/elements/effects/am-snap-plate/surface.ts"
+        },
+        {
+          "kind": "implementation",
+          "path": "rendering/elements/effects/am-snap-plate/scene.ts"
         }
       ]
     },
@@ -508,27 +534,27 @@
   },
   "resources": [
     {
-      "kind": "example",
+      "kind": "fixture",
       "path": "preview/scenes.json"
     },
     {
-      "kind": "example",
+      "kind": "fixture",
       "path": "preview/render.mjs"
     },
     {
-      "kind": "example",
+      "kind": "fixture",
       "path": "preview/make_art.py"
     },
     {
-      "kind": "example",
+      "kind": "fixture",
       "path": "preview/src/Preview.tsx"
     },
     {
-      "kind": "example",
+      "kind": "fixture",
       "path": "preview/src/Root.tsx"
     },
     {
-      "kind": "example",
+      "kind": "fixture",
       "path": "preview/src/index.ts"
     }
   ]

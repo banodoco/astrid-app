@@ -133,6 +133,35 @@ jobs:
           tar -xzf "$S/node.tar.gz" -C "$S/node" --strip-components=1
           test "$("$S/node/bin/node" --version)" = v20.19.4
           sha256sum "$S/node/bin/node"
+          # Verify every manifest-declared Node/Bun/FFmpeg asset by bytes; retain
+          # only its digest record. Each scratch archive is deleted only after hashing.
+          python - <<'PY'
+          import hashlib,json,os,pathlib,urllib.request
+          root=pathlib.Path(os.environ["RUNNER_TEMP"])/"h1a"
+          manifest=json.loads((root/"source-install-manifest.json").read_bytes())
+          records=[]
+          for tool in ("node","bun","ffmpeg"):
+              for platform,spec in manifest["tools"][tool]["assets"].items():
+                  urls=spec.get("urls",[spec.get("url")])
+                  digests=spec["sha256"] if isinstance(spec["sha256"],list) else [spec["sha256"]]
+                  if len(urls)!=len(digests) or not all(urls): raise SystemExit("asset shape mismatch")
+                  for index,(url,expected) in enumerate(zip(urls,digests)):
+                      path=root/"asset-download"
+                      h=hashlib.sha256()
+                      with urllib.request.urlopen(url,timeout=180) as src, path.open("wb") as dst:
+                          while chunk:=src.read(1024*1024):
+                              h.update(chunk); dst.write(chunk)
+                      actual=h.hexdigest()
+                      records.append({"tool":tool,"platform":platform,"index":index,"url":url,"expected":expected,"actual":actual})
+                      path.unlink()
+                      if actual!=expected: raise SystemExit("asset digest mismatch: "+url)
+          (root/"asset-verification.json").write_text(json.dumps(records,indent=2)+"\n")
+          print("Verified asset byte hashes",len(records))
+          PY
+          cd "$GITHUB_WORKSPACE/agent"
+          bash "$GITHUB_WORKSPACE/dev/env/agent-setup.sh"
+          "$GITHUB_WORKSPACE/agent.env/venv/bin/python" -c 'from astrid.core.pack.identity import pack_digest; import os; p=os.environ["GITHUB_WORKSPACE"]+"/pack/astrid_motion"; d=pack_digest(p); print("PACK_TREE_SHA256",d); assert d=="75234c10217e67ec0f111a4cb6be4a6252e172a9cd382506498d07ce1d241029"'
+          cd "$GITHUB_WORKSPACE"
           # The selected pack references _shared source while the predecessor has no
           # pack_build lock. This is an actual unresolved compatibility precondition,
           # not a claim that a lock is necessarily required. Stop before rendering.
@@ -264,5 +293,6 @@ jobs:
           name: r93-h1a-precheck-only
           path: |
             ${{ runner.temp }}/h1a/precheck.log
+            ${{ runner.temp }}/h1a/asset-verification.json
             ${{ runner.temp }}/h1a/served/
           if-no-files-found: warn

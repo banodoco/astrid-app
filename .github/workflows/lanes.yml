@@ -609,13 +609,75 @@ jobs:
           console.log(checkReleaseGuard({base:b,head}));
           console.log(checkAppRuntimeLock(m,readFileSync(process.env.APP+'/runtime.lock.json')));
           JS
-      - name: Preserve precheck evidence only
+      - name: Validate installer and predecessor compatibility
+        shell: bash
+        env:
+          S: ${{ runner.temp }}/h1a
+          APP: ${{ github.workspace }}/app
+          AGENT: ${{ github.workspace }}/agent
+          NODE: ${{ runner.temp }}/h1a/node/bin/node
+          AGENT_PY: ${{ github.workspace }}/agent.env/venv/bin/python
+          R15_AGENT_PY: ${{ github.workspace }}/r15agent.env/venv/bin/python
+        run: |
+          set -euo pipefail
+          exec > >(tee "$S/validation.log") 2>&1
+          date -u +%FT%TZ
+          cd "$AGENT"
+          "$AGENT_PY" -c 'import json,os; from astrid.installer.tools import validate_manifest; validate_manifest(json.load(open(os.environ["S"]+"/install-manifest.json"))); validate_manifest(json.load(open(os.environ["S"]+"/predecessor.json"))); print("candidate validator accepted both")'
+          cd "$GITHUB_WORKSPACE/r15agent"
+          "$R15_AGENT_PY" -c 'import json,os; from astrid.installer.tools import validate_manifest; validate_manifest(json.load(open(os.environ["S"]+"/install-manifest.json"))); print("predecessor validator accepted candidate")'
+          cd "$APP"
+          cp "$S/install-manifest.json" public/install-manifest.json
+          cmp "$S/install-manifest.json" public/install-manifest.json
+          command -v pwsh || { echo "ENV: real pwsh required for PowerShell suite"; exit 3; }
+          "$NODE" --test scripts/installer/manifest.test.mjs scripts/installer/release.test.mjs scripts/installer/bootstrap.test.mjs scripts/installer/bootstrap-powershell.test.mjs
+          cmp "$S/install-manifest.json" public/install-manifest.json
+          cd "$AGENT"
+          PYTEST_ADDOPTS=-rA bash "$GITHUB_WORKSPACE/dev/env/agent-pytest.sh" -q -p no:cacheprovider tests/test_installer_tools.py tests/test_installer_sources.py tests/test_installer_schema.py tests/test_installer_bootstrap_schema.py tests/test_installer_asset_checksums.py tests/test_installer_pack_build_toolchain.py tests/test_vibecomfy_pin.py tests/core/pack/test_identity.py tests/core/pack/test_release_manifest.py
+      - name: Create deterministic successful replay receipt
+        shell: bash
+        env:
+          S: ${{ runner.temp }}/h1a
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib,os,pathlib
+          root=pathlib.Path(os.environ["S"])
+          required=["input-record.json","staged-input.json","install-manifest.json","predecessor.json","install","install.ps1","install.sh","pin.mjs","release-guard.mjs","precheck.log","validation.log","asset-verification.json","pack-proof/pack-evidence.json","pack-proof/compile.log","pack-proof/compile.exit","pack-proof/app-boundary/app-tests.log","pack-proof/app-boundary/app-tests.exit","pack-proof/app-boundary/agent-comparison.log","pack-proof/app-boundary/agent-comparison.exit"]
+          paths=[root/x for x in required]
+          paths += sorted((root/"served").glob("*"))
+          paths += sorted((root/"pack-proof/modules").rglob("*.mjs"))
+          for p in paths:
+              if not p.is_file(): raise SystemExit("missing receipt input "+str(p))
+          lines=[hashlib.sha256(p.read_bytes()).hexdigest()+"  "+p.relative_to(root).as_posix() for p in sorted(paths,key=lambda x:x.relative_to(root).as_posix())]
+          out=root/"SHA256SUMS"; out.write_text("\n".join(lines)+"\n",encoding="utf-8")
+          print("SHA256SUMS",hashlib.sha256(out.read_bytes()).hexdigest())
+          PY
+      - name: Preserve allowlisted proof and failure evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: r93-h1a-precheck-only
+          name: r93-h1a-receipt-or-failure
           path: |
             ${{ runner.temp }}/h1a/precheck.log
             ${{ runner.temp }}/h1a/asset-verification.json
+            ${{ runner.temp }}/h1a/input-record.json
+            ${{ runner.temp }}/h1a/staged-input.json
+            ${{ runner.temp }}/h1a/install-manifest.json
+            ${{ runner.temp }}/h1a/predecessor.json
+            ${{ runner.temp }}/h1a/install
+            ${{ runner.temp }}/h1a/install.ps1
+            ${{ runner.temp }}/h1a/install.sh
+            ${{ runner.temp }}/h1a/pin.mjs
+            ${{ runner.temp }}/h1a/release-guard.mjs
+            ${{ runner.temp }}/h1a/validation.log
+            ${{ runner.temp }}/h1a/SHA256SUMS
+            ${{ runner.temp }}/h1a/pack-proof/*.json
+            ${{ runner.temp }}/h1a/pack-proof/*.log
+            ${{ runner.temp }}/h1a/pack-proof/*.exit
+            ${{ runner.temp }}/h1a/pack-proof/*.sha256
+            ${{ runner.temp }}/h1a/pack-proof/prove_pack.py
+            ${{ runner.temp }}/h1a/pack-proof/modules/
+            ${{ runner.temp }}/h1a/pack-proof/app-boundary/
             ${{ runner.temp }}/h1a/served/
           if-no-files-found: warn

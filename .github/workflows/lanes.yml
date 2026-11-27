@@ -504,6 +504,7 @@ jobs:
           NODE: ${{ runner.temp }}/h1a/node/bin/node
           AGENT_PY: ${{ github.workspace }}/agent.env/venv/bin/python
         run: |
+          exec > >(tee "$S/assembly.log") 2>&1
           set -euo pipefail
           export P=cc1d48f016fde55ad6b0609c619d8a4bcec56823
           export A=1c15a85a928ae77cd16ea1a2ed029697e3af4f3c
@@ -643,7 +644,7 @@ jobs:
           python - <<'PY'
           import hashlib,os,pathlib
           root=pathlib.Path(os.environ["S"])
-          required=["input-record.json","staged-input.json","install-manifest.json","predecessor.json","install","install.ps1","install.sh","pin.mjs","release-guard.mjs","precheck.log","validation.log","asset-verification.json","pack-proof/pack-evidence.json","pack-proof/compile.log","pack-proof/compile.exit","pack-proof/app-boundary/app-tests.log","pack-proof/app-boundary/app-tests.exit","pack-proof/app-boundary/agent-comparison.log","pack-proof/app-boundary/agent-comparison.exit"]
+          required=["input-record.json","staged-input.json","install-manifest.json","predecessor.json","install","install.ps1","install.sh","pin.mjs","release-guard.mjs","precheck.log","assembly.log","validation.log","asset-verification.json","pack-proof/pack-evidence.json","pack-proof/compile.log","pack-proof/compile.exit","pack-proof/app-boundary/app-tests.log","pack-proof/app-boundary/app-tests.exit","pack-proof/app-boundary/agent-comparison.log","pack-proof/app-boundary/agent-comparison.exit"]
           paths=[root/x for x in required]
           paths += sorted((root/"served").glob("*"))
           paths += sorted((root/"pack-proof/modules").rglob("*.mjs"))
@@ -651,6 +652,8 @@ jobs:
               if not p.is_file(): raise SystemExit("missing receipt input "+str(p))
           lines=[hashlib.sha256(p.read_bytes()).hexdigest()+"  "+p.relative_to(root).as_posix() for p in sorted(paths,key=lambda x:x.relative_to(root).as_posix())]
           out=root/"SHA256SUMS"; out.write_text("\n".join(lines)+"\n",encoding="utf-8")
+          for p,line in zip(sorted(paths,key=lambda x:x.relative_to(root).as_posix()),lines):
+              if hashlib.sha256(p.read_bytes()).hexdigest()!=line.split("  ",1)[0]: raise SystemExit("receipt verification failed "+str(p))
           print("SHA256SUMS",hashlib.sha256(out.read_bytes()).hexdigest())
           PY
       - name: Preserve allowlisted proof and failure evidence
@@ -671,6 +674,7 @@ jobs:
             ${{ runner.temp }}/h1a/pin.mjs
             ${{ runner.temp }}/h1a/release-guard.mjs
             ${{ runner.temp }}/h1a/validation.log
+            ${{ runner.temp }}/h1a/assembly.log
             ${{ runner.temp }}/h1a/SHA256SUMS
             ${{ runner.temp }}/h1a/pack-proof/*.json
             ${{ runner.temp }}/h1a/pack-proof/*.log

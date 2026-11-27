@@ -1,4 +1,4 @@
-import type {ComponentCapabilityContext, PreparedComponentCapability} from '@banodoco/timeline-composition/evaluation';
+import type {ComponentCapabilityContext, PreparedComponentCapability} from '@astrid-rendering/shared/element_contracts';
 import {plateSurface} from './surface';
 
 export const preparePlateScene = ({clip, assetEntry, width, height}: ComponentCapabilityContext): PreparedComponentCapability => {

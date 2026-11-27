@@ -9,6 +9,7 @@
  *          --files <json>        default config/astrid-vendor-files.json (the declared file set)
  *          --motion-projection <dir>  verified output of the Agent projection tool
  *          --motion-tool-repo <dir>   Agent checkout containing RN-5b-min tools
+ *          --motion-profile direct-source --motion-agent-commit <exact SHA>
  *
  * It reads the declared file set straight from git objects at the commit (the
  * Astrid checkout is never modified), keeps Astrid-relative paths, derives
@@ -26,7 +27,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { applyMotionProjection, MOTION_ROOT } from './motion-projection.mjs';
+import { applyMotionProjection, readMotionAgentSource, verifyMotionAgentSource, verifyMotionProjection, MOTION_ROOT } from './motion-projection.mjs';
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const args = Object.fromEntries(
@@ -92,7 +93,10 @@ for (const tool of JSON.parse(toolCatalogBytes.toString('utf8')).tools) {
 
 const motionProjection = includesMotion ? applyMotionProjection(
   out, commit, path.resolve(args['motion-projection']), path.resolve(args['motion-tool-repo']),
+  { profile: args['motion-profile'] ?? 'legacy-projection', agentCommit: args['motion-agent-commit'] },
 ) : undefined;
+const motionAgentSource = includesMotion && args['motion-profile'] === 'direct-source'
+  ? readMotionAgentSource(path.resolve(args['motion-tool-repo']), args['motion-agent-commit']).record : undefined;
 
 // public-catalog.ts = the generated catalog filtered to the declared selections, in selection order.
 const { output, source, selections } = declared.public_catalog;
@@ -139,14 +143,19 @@ for (const p of [...out.keys()].sort()) {
 const provenance = {
   astrid_commit: commit,
   astrid_tree: tree,
-  refresh_command: `node scripts/astrid-landing/refresh-vendor.mjs --astrid-repo <Astrid checkout> --commit ${commit}${motionProjection ? ' --motion-projection <verified pack> --motion-tool-repo <Agent checkout>' : ''}`,
+  refresh_command: `node scripts/astrid-landing/refresh-vendor.mjs --astrid-repo <Astrid checkout> --commit ${commit}${motionProjection ? ' --motion-projection <verified pack> --motion-tool-repo <Agent checkout>' : ''}${motionAgentSource ? ` --motion-profile direct-source --motion-agent-commit ${args['motion-agent-commit']}` : ''}`,
   ...(motionProjection ? { motion_projection: motionProjection } : {}),
+  ...(motionAgentSource ? { motion_agent_source: motionAgentSource } : {}),
   declared_files: path.relative(appRoot, declaredPath),
   excluded_files: [...excluded].sort(),
   verify_command: 'node scripts/build/verify-astrid-vendor-sources.mjs',
   files,
 };
 fs.writeFileSync(path.join(staging, 'provenance.json'), `${JSON.stringify(provenance, null, 2)}\n`);
+verifyMotionProjection(staging, provenance);
+if (motionAgentSource) verifyMotionAgentSource(staging, provenance, {
+  agentRepo: path.resolve(args['motion-tool-repo']), agentCommit: args['motion-agent-commit'],
+});
 const readme = path.join(destination, 'README.md');
 if (fs.existsSync(readme)) fs.copyFileSync(readme, path.join(staging, 'README.md'));
 fs.rmSync(destination, { recursive: true, force: true });

@@ -1,4 +1,4 @@
-import type {ComponentCapabilityContext, ComponentFrameSupport, PreparedComponentCapability} from '@banodoco/timeline-composition/evaluation';
+import type {ComponentCapabilityContext, ComponentFrameSupport, PreparedComponentCapability} from '@astrid-rendering/shared/element_contracts';
 import {elementSource, narrowParams} from '../../_shared/am';
 import {footageField, insetOf} from './helper';
 

@@ -1,7 +1,7 @@
 {
   "astrid_commit": "ec0a9f5baef2c31bc5179087b83f044524575182",
   "astrid_tree": "83b84c79941917fde535ee3ddba5533a776cace3",
-  "refresh_command": "node scripts/astrid-landing/refresh-motion-projection.mjs --projection <verified pack> --agent-repo <Agent checkout> --destination <new dir>",
+  "refresh_command": "node scripts/astrid-landing/refresh-motion-projection.mjs --projection <verified pack> --agent-repo <Agent checkout> --destination <new dir> --profile direct-source --agent-commit 4210932093c8c34838dbe3c7e11a14a3536c2411",
   "declared_files": "config/astrid-vendor-files.json",
   "excluded_files": [
     "astrid/packs/rendering/editor/live-scenes/diagnostics.ts",
@@ -23,8 +23,8 @@
   "verify_command": "node scripts/build/verify-astrid-vendor-sources.mjs",
   "files": {
     "LICENSE": "d4b2605d17cc8f84c757f3698b2660ab1382adeee76e9a31b13d7b0d8b37e3a7",
-    "astrid/packs/astrid_motion/docs/SKILL.md": "ca0725b7a5e2fcdb5ac4c4123a102c621adea04f7decfea407dfeac3fec47a55",
-    "astrid/packs/astrid_motion/pack.yaml": "f2b5e9a17ee569dbfd073a00e1780b305227d05b0b1d0bdb9cd67e47be4b733a",
+    "astrid/packs/astrid_motion/docs/SKILL.md": "47d08517c1fb95f4779449c681efa3176644da1779240e26cdc55b31f6b39d5d",
+    "astrid/packs/astrid_motion/pack.yaml": "85585b50494abfdeeca7597f88b162b2c850fe30564308910208bc53a053f5d7",
     "astrid/packs/astrid_motion/preview/make_art.py": "1d3f8f0d6aa724fcf4e41873fd8e669f4aece6b401360ef9160c0d4001303161",
     "astrid/packs/astrid_motion/preview/render.mjs": "cc5d489eae5e53f1aed9d87f840ed26453750dfac8478688a533a304a2382e1d",
     "astrid/packs/astrid_motion/preview/scenes.json": "01cbb9ebeb11f1e8100ef055d4f3b4a6ec6ce447bfb14aa9c83d196d59cfb967",
@@ -51,7 +51,7 @@
     "astrid/packs/astrid_motion/rendering/elements/effects/am-footage/component.tsx": "bc7a1c0e4516703206de3964fac52c1682bec3fe6c2b150dbb9b42ef355316ec",
     "astrid/packs/astrid_motion/rendering/elements/effects/am-footage/element.yaml": "a7c4d86719331bc76ca580c4ae9e220c6a5ef93cbf8e258dff529f6a9a72aeab",
     "astrid/packs/astrid_motion/rendering/elements/effects/am-footage/helper.ts": "7d04f19d21b5a59555cc4725d54fa087e57068a8cf9da58f618be05764082fb9",
-    "astrid/packs/astrid_motion/rendering/elements/effects/am-footage/scene.ts": "1e94041c8178687a82e4c5b54fb29b8cf0c281f74e9e624fdaf832f647072afa",
+    "astrid/packs/astrid_motion/rendering/elements/effects/am-footage/scene.ts": "850a0441416cbce694ca772a4dab6655f42cb33f5028223da46c91872927dfc8",
     "astrid/packs/astrid_motion/rendering/elements/effects/am-footage/volume.ts": "b5fc7040551c6ef8e3e7d83afee7b431fc93ac70bd64ae6ddf9a3fa35ebc6ce6",
     "astrid/packs/astrid_motion/rendering/elements/effects/am-orbit/component.tsx": "e294619aaedbbe76320539a8f279ce1b78b7bb2d4e0d6e0457247d4c058f82d5",
     "astrid/packs/astrid_motion/rendering/elements/effects/am-orbit/element.yaml": "529c0a5dbeb8c412b66fdbbce538a27e8945507ecdecc462aed03d762a3e1bb9",
@@ -66,7 +66,7 @@
     "astrid/packs/astrid_motion/rendering/elements/effects/am-presenter/element.yaml": "7bbcb59775818bda4d0cdc58e364256139d904901ce87bcc7263c8ee80afe156",
     "astrid/packs/astrid_motion/rendering/elements/effects/am-presenter/motion.ts": "05dbda5dfbaf5345532582ad43924cfe4c701d76ec1336319cacdb8948713ec3",
     "astrid/packs/astrid_motion/rendering/elements/effects/am-presenter/presenter-core.ts": "6f3bc8fbf8f612c3ba369cfdac811294b2d53a88b853b15a8be64576d8bfe731",
-    "astrid/packs/astrid_motion/rendering/elements/effects/am-presenter/scene.ts": "775cd1840d0eeb4477598508c1780c2f7fca0701669e1d4efcd643448dd402f5",
+    "astrid/packs/astrid_motion/rendering/elements/effects/am-presenter/scene.ts": "3649189e76be024a07b66d5f29b4d21638e4135ec91b671fadc5f152a7c48838",
     "astrid/packs/astrid_motion/rendering/elements/effects/am-quote/component.tsx": "08b9608d01480c13910da79e5de838a1954559a5a63b737259c85ee8ddd7ede1",
     "astrid/packs/astrid_motion/rendering/elements/effects/am-quote/element.yaml": "9ba3959fb4abf7237aaa26630ba476d93d4caf5365f962994eb9dc23e7ff3370",
     "astrid/packs/astrid_motion/rendering/elements/effects/am-seasons/component.tsx": "9ef9e9242ce75e4a3b21b81ecd05a1e5876eda1d11f8be2ae61dbdc51b97677e",
@@ -74,16 +74,16 @@
     "astrid/packs/astrid_motion/rendering/elements/effects/am-snap-plate/component.tsx": "93fc2fb7ab03a4d64d9e1c53a9a40de6de75860576b77f5b6f2c31cbd9c292ee",
     "astrid/packs/astrid_motion/rendering/elements/effects/am-snap-plate/element.yaml": "7e07703f34bbce7e0bc8d9b7f79efe9a48360ffaf001ae8cec3da3cf6ccfeb32",
     "astrid/packs/astrid_motion/rendering/elements/effects/am-snap-plate/motion.ts": "789545a001927ea413eb677c24d3f1c05c5077a4257e342d20a68b63e5ec32ea",
-    "astrid/packs/astrid_motion/rendering/elements/effects/am-snap-plate/scene.ts": "e43bb6dfe94a770df11e21bcf5e959e9591387d7952dda11176c79fc9e2c686e",
+    "astrid/packs/astrid_motion/rendering/elements/effects/am-snap-plate/scene.ts": "abc504d6a1c9f8e104298ca2d5da9d871900e843f20a5fe213943b8c5b44b9cb",
     "astrid/packs/astrid_motion/rendering/elements/effects/am-snap-plate/surface.ts": "5c844e62bd6d32673d16ad17d61435380050ffbe2cb92036d2251ac3579edd49",
-    "astrid/packs/astrid_motion/rendering/elements/effects/am-sprite/component.tsx": "fc79cee164d9d7aeb2a008d9d924e7b41710856b0b630bbc91137ff504b5172e",
-    "astrid/packs/astrid_motion/rendering/elements/effects/am-sprite/element.yaml": "05218725cc0c70c0c708bae8fa57a430b606517d6861cf2344ea623a94c9ca3a",
+    "astrid/packs/astrid_motion/rendering/elements/effects/am-sprite/component.tsx": "0024ec93e98ef3bd2e5f71382d0fe8c6be662be32f79738aa614d44a44f0e7b8",
+    "astrid/packs/astrid_motion/rendering/elements/effects/am-sprite/element.yaml": "339a45b3709bc89eb0dffac0cc5b9fc581c191f65fa69dbf8a026bb6f916d9a5",
     "astrid/packs/astrid_motion/rendering/elements/effects/am-terminal/component.tsx": "ca863ed067e560497f8dd946e29933fb103c9cfae629c97b36711e477e8db74e",
     "astrid/packs/astrid_motion/rendering/elements/effects/am-terminal/element.yaml": "1e05df27df1ccf82d76d62cf2085dea7551018da6dc62fbfe9a6f42edbaa89a6",
     "astrid/packs/astrid_motion/rendering/elements/effects/am-tweet/component.tsx": "b889f7d0dd95d945deebec74e825b9f168f0b6d8f5ea6457f9464d04871d4d2b",
     "astrid/packs/astrid_motion/rendering/elements/effects/am-tweet/element.yaml": "be1a09967880f5f2e3fcb91eed17317a73bbe34eaf13f433907c5a0eeb9744f5",
-    "astrid/packs/astrid_motion/rendering/elements/effects/am-type/component.tsx": "2d9fdb33fb995d5fc049cac431048b3a7a82e13d863eae2fd13c17533ce032b9",
-    "astrid/packs/astrid_motion/rendering/elements/effects/am-type/element.yaml": "8a78e98f4cf2fefd54f2559123e49c6f9dc396865144cf110a8a280cce4eec8b",
+    "astrid/packs/astrid_motion/rendering/elements/effects/am-type/component.tsx": "20376c3ab432366b54a82adc69f26f603ee8da44c6135a842529c45f69abc4c5",
+    "astrid/packs/astrid_motion/rendering/elements/effects/am-type/element.yaml": "51c53b9fce5512f4ec0c20c1611be388256f636ec2193fe7c66bc83da129a89b",
     "astrid/packs/astrid_motion/rendering/elements/effects/am-type/position-keys.ts": "2965b083cfc0035e46bc82658c09806a98f50038400f4047c6b8c541f5809c9b",
     "astrid/packs/astrid_motion/rendering/elements/effects/am-ui-sketch/component.tsx": "8e1219af8d926dd352507d6cdb2dddba1b876bfbe95ac5c580c6d0644f7a8b90",
     "astrid/packs/astrid_motion/rendering/elements/effects/am-ui-sketch/element.yaml": "e7281271f6a17d75100e5266877330501198f328c0f2972f281e1d0a5c109ae8",
@@ -134,7 +134,7 @@
     "astrid/packs/local/shared/clip-effects.ts": "418cb06503e0e330b27f388e7f1bcce72196e3ddd74e22a4af2ea9d2b3617025",
     "astrid/packs/local/shared/readiness-image.tsx": "353c117886d9dcc0932ae16e25ca4b85e2433919ceaebff7834a96142441dd99",
     "astrid/packs/rendering/editor/catalog.ts": "f4fa4077339b35ec91482ca7e6cd51dc79edc21969500122688b040ee500c94d",
-    "astrid/packs/rendering/elements/catalog.ts": "cb8e5793847287db65dc57fa65160ace4831a9d39d9dacb7fb36acf39028bde0",
+    "astrid/packs/rendering/elements/catalog.ts": "ecf73d9210dea6ddbad459f071fbb85f92c771f2d81557e6f3d87d0d51d4972f",
     "astrid/packs/rendering/elements/public-catalog.ts": "c5c023060c288b2fc015532049d28fbe17b5c92fce2dd5a9dd1b3553bff83a3f",
     "astrid/packs/rendering/rendering/elements/animations/fade-up/element.yaml": "2534d142fb47e573489ddc08727c26292492f377c6ba39881ee9d1005eb1081d",
     "astrid/packs/rendering/rendering/elements/animations/fade/element.yaml": "65df111c8e261dded80fb0be284d9aaaafc926dca8052e4e378225a5dcbd864b",
@@ -147,7 +147,7 @@
     "astrid/packs/rendering/rendering/elements/effects/text-card/element.yaml": "e478beaa5a0f949c472fcbfb8c21068381ef4181b5ed2eee7c48e1171663daea",
     "astrid/packs/rendering/rendering/elements/transitions/cross-fade/element.yaml": "d1bf5a452ff6b8637e380a7eafb1bc90d4fcf5e3e91de557622ba727b7110eb4",
     "astrid/packs/rendering/rendering/elements/transitions/fade/element.yaml": "28f1b4f74919f026418ee2b1d1d7a294a6674cb7ef5709e0db95ee6f9dc9c7c2",
-    "astrid/packs/rendering/shared/element_contracts.ts": "3d3f639bea957170408a69584da4bac932efe508769e1f5887007fd4eaaff066",
+    "astrid/packs/rendering/shared/element_contracts.ts": "020cd57e1e3c81717eb0715c0710724522f82f95e6ec609dc86466f7ac6dc341",
     "astrid/packs/rendering/shared/managed-media-policy.ts": "712fc4cb008226ff9578f37fb857dc62ae8601c8b4ad4e2de6687fbc24d9c8d5",
     "astrid/packs/rendering/shared/managed-media.tsx": "7e010dbd196c1c4dc00eaa40178e47b43ad4a8d203de8db536697b5137c23209",
     "astrid/packs/rendering/shared/readiness-image.tsx": "5fcf2539131fd75dfbedffb71b075bf165c840404a1036451dcf874ea486832f",
@@ -176,6 +176,7 @@
     "astrid/packs/rendering/ui/transcript/extension.tsx": "870ef0dadec02b41246161fdd74653756a26fc5d53c4458d7221af67202bee1e",
     "astrid/packs/video_editing/pack.yaml": "53ad0207af00cd880a3e8261c03f9caab69cc59b471064d141b4e8c36c125216",
     "astrid/packs/video_editing/ui/video-editor/entry.json": "ae53de8e3eb3b8fe6157a18f7bdaabda7d0f6886a120f45482e05c982a6523b0",
+    "astrid/resources/astrid_motion_release_source.json": "a14a6152dbb14e4c73f5ca539fc1eb2219f7c8335be0085ddc6db34fdb3b6f9b",
     "astrid/tools/catalog.json": "05677b1f9cd9f931c9681edee821e848f243159787e44cdc2cda2e4136fdf237",
     "remotion/public/fonts/DepartureMono-Regular.woff2": "5b4fed1daa90708aa9c6ee1190abca9dc22164a1c1def0020386e46b61038cfb",
     "remotion/public/fonts/FONT_PROVENANCE.md": "f67cf424fcb63d4fc17e5cef0e4dbeea837aae1eb3f1eb1e081170c5822e2eec",
@@ -192,16 +193,31 @@
     "remotion/src/fonts.ts": "5292071414d67cfaeee2eb7c04724d030809f5ef0ed6a3fbaaff58cde98d9bdb"
   },
   "motion_projection": {
-    "schema": "astrid-motion-projection/v1",
-    "pack_id": "astrid_motion",
-    "repo": "https://github.com/banodoco/astrid-agent",
-    "upstream_commit": "ec0a9f5baef2c31bc5179087b83f044524575182",
-    "upstream_subpath": "astrid/packs/astrid_motion",
-    "upstream_tree": "346d66125414e5d57aa278ed0940893ab23021bd",
     "digest_rule": "pack-tree-v1",
-    "upstream_digest": "598b1c3d1beaac08a5e07415037624ecd58608487b65003d615a4e489794dcdd",
-    "alias_only_digest": "44b55800e7725686b202767723de5db2aed0dcda2c4585cbfaca1a1a6065c96c",
-    "tree_digest": "414a6fd1241111a7efbc11f443ad80adcb1a4963f96b4575d6de4205745d67c4",
-    "file_count": 64
+    "file_count": 64,
+    "pack_id": "astrid_motion",
+    "repo": "https://github.com/banodoco/poms_packs",
+    "schema": "astrid-motion-release-source/v1",
+    "transform": "identity",
+    "tree_digest": "be6abd1feb9759eca56364c6a2ccded470977aaf965a8e208cdd4f1bedcf77cf",
+    "upstream_commit": "23f78bfc7e3cb26e320e8d3c6bd30a8b94cd92e1",
+    "upstream_digest": "be6abd1feb9759eca56364c6a2ccded470977aaf965a8e208cdd4f1bedcf77cf",
+    "upstream_subpath": "astrid_motion",
+    "upstream_tree": "9668568025190d0a8b5742cda0aec32ffaf9d5d0"
+  },
+  "motion_agent_source": {
+    "schema": "astrid-motion-agent-source/v1",
+    "repo": "https://github.com/banodoco/astrid-agent",
+    "commit": "4210932093c8c34838dbe3c7e11a14a3536c2411",
+    "files": {
+      "astrid/packs/rendering/shared/element_contracts.ts": {
+        "blob": "8ddfcb69c5e7edab9f80f1f2f99225d8ca23294a",
+        "sha256": "020cd57e1e3c81717eb0715c0710724522f82f95e6ec609dc86466f7ac6dc341"
+      },
+      "astrid/resources/astrid_motion_release_source.json": {
+        "blob": "96ae68dee647ab572a505d225dbd5d2cdd128416",
+        "sha256": "a14a6152dbb14e4c73f5ca539fc1eb2219f7c8335be0085ddc6db34fdb3b6f9b"
+      }
+    }
   }
 }

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { expect, it } from 'vitest';
@@ -43,5 +43,52 @@ it('keeps motion upstream provenance and adds a separately verified tree identit
     expect(resolveEditorPackRevisions(vendor, vendor)).toBeNull();
   } finally {
     rmSync(vendor, { recursive: true, force: true });
+  }
+});
+
+it('resolves the complete generated direct source with distinct motion and unrelated pack origins', () => {
+  const vendor = path.resolve('vendor/astrid-browser');
+  const provenance = JSON.parse(readFileSync(path.join(vendor, 'provenance.json'), 'utf8'));
+  expect(provenance.motion_projection.schema).toBe('astrid-motion-release-source/v1');
+  expect(provenance.motion_projection.upstream_commit).not.toBe(provenance.astrid_commit);
+  const resolved = resolveEditorPackRevisions(vendor, vendor);
+  expect(resolved).not.toBeNull();
+  expect(resolved?.astrid_motion).toBe(provenance.motion_projection.upstream_commit);
+  expect(resolved?.astrid_motion_tree).toBe(provenance.motion_projection.tree_digest);
+  expect(resolved?.video_editing).toBe(provenance.astrid_commit);
+  for (const [id, revision] of Object.entries(resolved ?? {})) {
+    if (id !== 'astrid_motion' && id !== 'astrid_motion_tree') expect(revision).toBe(provenance.astrid_commit);
+  }
+  expect(resolveEditorPackRevisions(path.resolve('.'), vendor)).toBeNull();
+});
+
+it('refuses direct component, helper, descriptor, contract, witness and source-commit tampering', () => {
+  const temporary = mkdtempSync(path.join(tmpdir(), 'motion-editor-direct-'));
+  const vendor = path.join(temporary, 'vendor');
+  cpSync(path.resolve('vendor/astrid-browser'), vendor, { recursive: true });
+  const provenancePath = path.join(vendor, 'provenance.json');
+  const originalProvenance = readFileSync(provenancePath);
+  try {
+    expect(resolveEditorPackRevisions(vendor, vendor)).not.toBeNull();
+    for (const relative of [
+      'astrid/packs/astrid_motion/rendering/elements/effects/am-sprite/component.tsx',
+      'astrid/packs/astrid_motion/rendering/elements/_shared/am.tsx',
+      'astrid/packs/astrid_motion/rendering/elements/effects/am-type/element.yaml',
+      'astrid/packs/rendering/shared/element_contracts.ts',
+      'astrid/resources/astrid_motion_release_source.json',
+    ]) {
+      const file = path.join(vendor, relative), bytes = readFileSync(file);
+      writeFileSync(file, Buffer.concat([bytes, Buffer.from('\nchanged\n')]));
+      expect(resolveEditorPackRevisions(vendor, vendor), relative).toBeNull();
+      writeFileSync(file, bytes);
+    }
+    const changed = JSON.parse(originalProvenance.toString());
+    changed.motion_projection.upstream_commit = '0'.repeat(40);
+    writeFileSync(provenancePath, JSON.stringify(changed));
+    expect(resolveEditorPackRevisions(vendor, vendor)).toBeNull();
+    writeFileSync(provenancePath, originalProvenance);
+    expect(resolveEditorPackRevisions(vendor, vendor)).not.toBeNull();
+  } finally {
+    rmSync(temporary, { recursive: true, force: true });
   }
 });

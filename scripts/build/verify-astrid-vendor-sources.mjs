@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { lstat, readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { verifyMotionProjection } from '../astrid-landing/motion-projection.mjs';
+import { verifyMotionAgentSource, verifyMotionProjection } from '../astrid-landing/motion-projection.mjs';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const closureRoot = path.join(projectRoot, 'vendor/astrid-build-inputs');
@@ -54,6 +54,16 @@ const provenance = JSON.parse(await readFile(path.join(browserRoot, 'provenance.
 if (!/^[0-9a-f]{40}$/.test(provenance.astrid_commit ?? '')) throw new Error('vendor/astrid-browser provenance lacks astrid_commit');
 const motionDigest = verifyMotionProjection(browserRoot, provenance);
 if (motionDigest) process.stdout.write(`Verified motion projection ${motionDigest}.\n`);
+const args = Object.fromEntries(process.argv.slice(2).reduce(
+  (pairs, arg, i, all) => arg.startsWith('--') ? [...pairs, [arg.slice(2), all[i + 1]]] : pairs, [],
+));
+if (Object.hasOwn(args, 'motion-agent-repo') || Object.hasOwn(args, 'motion-agent-commit')) {
+  if (!args['motion-agent-repo'] || !args['motion-agent-commit']) throw new Error('Both exact motion Agent source arguments are required');
+  const commit = verifyMotionAgentSource(browserRoot, provenance, {
+    agentRepo: args['motion-agent-repo'], agentCommit: args['motion-agent-commit'],
+  });
+  process.stdout.write(`Verified selected motion Agent Git source ${commit}.\n`);
+}
 const recorded = Object.entries(provenance.files ?? {});
 if (recorded.length === 0) throw new Error('vendor/astrid-browser provenance lists no files');
 for (const [relative, expected] of recorded) {
@@ -63,10 +73,12 @@ for (const [relative, expected] of recorded) {
 }
 const onDisk = [];
 const walk = async (dir) => {
+  if (!(await lstat(dir)).isDirectory()) throw new Error('Browser vendor is not a real directory: ' + dir);
   for (const entry of await readdir(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) await walk(full);
-    else onDisk.push(path.relative(browserRoot, full).split(path.sep).join('/'));
+    else if (entry.isFile()) onDisk.push(path.relative(browserRoot, full).split(path.sep).join('/'));
+    else throw new Error('Non-regular browser vendor path: ' + full);
   }
 };
 await walk(browserRoot);

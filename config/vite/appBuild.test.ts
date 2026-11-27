@@ -82,9 +82,9 @@ describe('App build info', () => {
 
   it('includes the owners of element modules bundled by the editor', () => {
     const vendorRoot = path.resolve(__dirname, '../../vendor/astrid-browser');
-    const { astrid_commit: commit } = JSON.parse(readFileSync(path.join(vendorRoot, 'provenance.json'), 'utf8'));
+    const { astrid_commit: commit, motion_projection: motion } = JSON.parse(readFileSync(path.join(vendorRoot, 'provenance.json'), 'utf8'));
     expect(resolveEditorPackRevisions(vendorRoot, vendorRoot)).toMatchObject({
-      astrid_motion: commit,
+      astrid_motion: motion.upstream_commit,
       rendering: commit,
       local: commit,
     });
@@ -94,7 +94,7 @@ describe('App build info', () => {
     const vendorRoot = path.resolve(__dirname, '../../vendor/astrid-browser');
     const directory = mkdtempSync(path.join(tmpdir(), 'astrid-motion-provenance-'));
     const manifestPath = path.join(directory, 'manifest.json');
-    const { astrid_commit: commit } = JSON.parse(readFileSync(path.join(vendorRoot, 'provenance.json'), 'utf8'));
+    const { motion_projection: { upstream_commit: commit, tree_digest: digest } } = JSON.parse(readFileSync(path.join(vendorRoot, 'provenance.json'), 'utf8'));
     try {
       writeFileSync(manifestPath, '{}');
       const plugin = createAppBuildPlugin({ appBuild: 'app', manifestPath, selectedCheckout: vendorRoot, vendorRoot });
@@ -102,6 +102,7 @@ describe('App build info', () => {
       const revisions = JSON.parse(config.define.__ASTRID_EDITOR_PACK_REVISIONS__);
       expect(commit).toMatch(/^[0-9a-f]{40}$/);
       expect(revisions.astrid_motion).toBe(commit);
+      expect(revisions.astrid_motion_tree).toBe(digest);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

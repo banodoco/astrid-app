@@ -1,7 +1,7 @@
 {
   "astrid_commit": "ec0a9f5baef2c31bc5179087b83f044524575182",
   "astrid_tree": "83b84c79941917fde535ee3ddba5533a776cace3",
-  "refresh_command": "node scripts/astrid-landing/refresh-motion-projection.mjs --projection <verified pack> --agent-repo <Agent checkout> --destination <new dir> --profile direct-source --agent-commit 4210932093c8c34838dbe3c7e11a14a3536c2411",
+  "refresh_command": "node scripts/astrid-landing/refresh-motion-projection.mjs --projection <verified pack> --agent-repo <Agent checkout> --destination <new dir> --profile direct-source --agent-commit 0a3d4019db73f1dc55881af4b4637d9795e21d4c",
   "declared_files": "config/astrid-vendor-files.json",
   "excluded_files": [
     "astrid/packs/rendering/editor/live-scenes/diagnostics.ts",
@@ -176,7 +176,7 @@
     "astrid/packs/rendering/ui/transcript/extension.tsx": "870ef0dadec02b41246161fdd74653756a26fc5d53c4458d7221af67202bee1e",
     "astrid/packs/video_editing/pack.yaml": "53ad0207af00cd880a3e8261c03f9caab69cc59b471064d141b4e8c36c125216",
     "astrid/packs/video_editing/ui/video-editor/entry.json": "ae53de8e3eb3b8fe6157a18f7bdaabda7d0f6886a120f45482e05c982a6523b0",
-    "astrid/resources/astrid_motion_release_source.json": "a14a6152dbb14e4c73f5ca539fc1eb2219f7c8335be0085ddc6db34fdb3b6f9b",
+    "astrid/resources/astrid_motion_release_source.json": "ba34c4f0c3adb074d45d1d3a69f43a11a8b25d8d50cf945124a9cd78a5cc5e42",
     "astrid/tools/catalog.json": "05677b1f9cd9f931c9681edee821e848f243159787e44cdc2cda2e4136fdf237",
     "remotion/public/fonts/DepartureMono-Regular.woff2": "5b4fed1daa90708aa9c6ee1190abca9dc22164a1c1def0020386e46b61038cfb",
     "remotion/public/fonts/FONT_PROVENANCE.md": "f67cf424fcb63d4fc17e5cef0e4dbeea837aae1eb3f1eb1e081170c5822e2eec",
@@ -200,7 +200,7 @@
     "schema": "astrid-motion-release-source/v1",
     "transform": "identity",
     "tree_digest": "be6abd1feb9759eca56364c6a2ccded470977aaf965a8e208cdd4f1bedcf77cf",
-    "upstream_commit": "23f78bfc7e3cb26e320e8d3c6bd30a8b94cd92e1",
+    "upstream_commit": "8f392101717c18b2e84de425828de3985913a6f9",
     "upstream_digest": "be6abd1feb9759eca56364c6a2ccded470977aaf965a8e208cdd4f1bedcf77cf",
     "upstream_subpath": "astrid_motion",
     "upstream_tree": "9668568025190d0a8b5742cda0aec32ffaf9d5d0"
@@ -208,15 +208,15 @@
   "motion_agent_source": {
     "schema": "astrid-motion-agent-source/v1",
     "repo": "https://github.com/banodoco/astrid-agent",
-    "commit": "4210932093c8c34838dbe3c7e11a14a3536c2411",
+    "commit": "0a3d4019db73f1dc55881af4b4637d9795e21d4c",
     "files": {
       "astrid/packs/rendering/shared/element_contracts.ts": {
         "blob": "8ddfcb69c5e7edab9f80f1f2f99225d8ca23294a",
         "sha256": "020cd57e1e3c81717eb0715c0710724522f82f95e6ec609dc86466f7ac6dc341"
       },
       "astrid/resources/astrid_motion_release_source.json": {
-        "blob": "96ae68dee647ab572a505d225dbd5d2cdd128416",
-        "sha256": "a14a6152dbb14e4c73f5ca539fc1eb2219f7c8335be0085ddc6db34fdb3b6f9b"
+        "blob": "138b5ef3897d969189ea2d9b8720060ec2be9f6a",
+        "sha256": "ba34c4f0c3adb074d45d1d3a69f43a11a8b25d8d50cf945124a9cd78a5cc5e42"
       }
     }
   }

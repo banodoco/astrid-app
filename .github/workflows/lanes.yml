@@ -162,11 +162,334 @@ jobs:
           bash "$GITHUB_WORKSPACE/dev/env/agent-setup.sh"
           "$GITHUB_WORKSPACE/agent.env/venv/bin/python" -c 'from astrid.core.pack.identity import pack_digest; import os; p=os.environ["GITHUB_WORKSPACE"]+"/pack/astrid_motion"; d=pack_digest(p); print("PACK_TREE_SHA256",d); assert d=="75234c10217e67ec0f111a4cb6be4a6252e172a9cd382506498d07ce1d241029"'
           cd "$GITHUB_WORKSPACE"
-          # The selected pack references _shared source while the predecessor has no
-          # pack_build lock. This is an actual unresolved compatibility precondition,
-          # not a claim that a lock is necessarily required. Stop before rendering.
-          python -c 'import json,os,pathlib; w=pathlib.Path(os.environ["GITHUB_WORKSPACE"]); m=json.load(open(w/"app/public/install-manifest.json")); p=(w/"pack/astrid_motion/pack.yaml").read_text(); assert "pack_build" not in m; assert "rendering/elements/_shared/" in p; print("PRECONDITION_UNRESOLVED: shared-module compiler/build compatibility is not yet established")'
-          exit 3
+      - name: Prepare exact prior Agent environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE/r15agent"
+          bash "$GITHUB_WORKSPACE/dev/env/agent-setup.sh"
+      - name: Authored pack compiler and App boundary
+        shell: bash
+        env:
+          S: ${{ runner.temp }}/h1a
+          APP: ${{ github.workspace }}/app
+          AGENT: ${{ github.workspace }}/agent
+          RUNTIME: ${{ github.workspace }}/runtime
+          VIBE: ${{ github.workspace }}/vibe
+          LIFE: ${{ github.workspace }}/life
+          PACK: ${{ github.workspace }}/pack
+          OMP: ${{ github.workspace }}/omp
+          NODE: ${{ runner.temp }}/h1a/node/bin/node
+          AGENT_PY: ${{ github.workspace }}/agent.env/venv/bin/python
+          R15_AGENT_PY: ${{ github.workspace }}/r15agent.env/venv/bin/python
+        run: |
+          set -euo pipefail
+          export A=1c15a85a928ae77cd16ea1a2ed029697e3af4f3c
+          export P=cc1d48f016fde55ad6b0609c619d8a4bcec56823
+          export PACK_COMMIT=2379ab54aca522019ff4f869cfdf9375bdb56dfc
+          export PACK_DIGEST=75234c10217e67ec0f111a4cb6be4a6252e172a9cd382506498d07ce1d241029
+          export ASTRID_NODE_EXECUTABLE="$NODE"
+          export ASTRID_REMOTION_PROJECT_DIR="$AGENT/remotion"
+          export PYTHONDONTWRITEBYTECODE=1
+          unset NODE_OPTIONS NODE_PATH ESBUILD_BINARY_PATH
+          export PATH="$(dirname "$NODE"):$PATH"
+          NPM_CLI="$(dirname "$NODE")/../lib/node_modules/npm/bin/npm-cli.js"
+          export NPM_CLI="$(realpath "$NPM_CLI")"
+          export npm_config_cache="$S/npm-cache"
+          test "$("$NODE" --version)" = v20.19.4
+          test "$("$NODE" "$NPM_CLI" --version)" = 10.8.2
+          test "$("$NODE" -p 'process.platform+":"+process.arch')" = linux:x64
+          test "$(git -C "$AGENT" rev-parse HEAD)" = "$A"
+          test "$(git -C "$APP" rev-parse HEAD)" = "$P"
+          test "$(git -C "$PACK" rev-parse HEAD)" = "$PACK_COMMIT"
+          test -z "$(git -C "$PACK" status --porcelain --untracked-files=all)"
+          mkdir "$S/pack-proof" "$S/pack-proof/source" "$S/pack-proof/modules"
+          export PACK_PROOF="$S/pack-proof"
+          git -C "$PACK" archive --format=tar "$PACK_COMMIT" astrid_motion > "$PACK_PROOF/source.tar"
+          tar -xf "$PACK_PROOF/source.tar" -C "$PACK_PROOF/source"
+          sha256sum "$PACK_PROOF/source.tar" "$NODE" "$NPM_CLI" > "$PACK_PROOF/tool-and-export.sha256"
+          git -C "$AGENT" show "$A:remotion/package.json" > "$PACK_PROOF/remotion-package.json"
+          git -C "$AGENT" show "$A:remotion/package-lock.json" > "$PACK_PROOF/remotion-package-lock.json"
+          cmp "$PACK_PROOF/remotion-package.json" "$AGENT/remotion/package.json"
+          cmp "$PACK_PROOF/remotion-package-lock.json" "$AGENT/remotion/package-lock.json"
+          # Preserve the real lock and its install scripts; cache only inside task scratch.
+          (cd "$AGENT/remotion" && "$NODE" "$NPM_CLI" ci --no-audit --no-fund) 2>&1 | tee "$PACK_PROOF/npm-ci.log"
+          cmp "$PACK_PROOF/remotion-package.json" "$AGENT/remotion/package.json"
+          cmp "$PACK_PROOF/remotion-package-lock.json" "$AGENT/remotion/package-lock.json"
+          # npm ci uses the frozen platform package. Record actual native binary and shim/copy.
+          "$AGENT/remotion/node_modules/@esbuild/linux-x64/bin/esbuild" --version | tee "$PACK_PROOF/esbuild-native-version.log"
+          test "$(cat "$PACK_PROOF/esbuild-native-version.log")" = 0.27.7
+          cat > "$PACK_PROOF/prove_pack.py" <<'PY'
+          import hashlib, json, os, pathlib, subprocess, sys, traceback
+          from collections.abc import Mapping
+          import yaml
+          
+          P = pathlib.Path(os.environ["PACK_PROOF"]).resolve(strict=True)
+          root = (P / "source/astrid_motion").resolve(strict=True)
+          agent = pathlib.Path(os.environ["AGENT"]).resolve(strict=True)
+          pack = pathlib.Path(os.environ["PACK"]).resolve(strict=True)
+          rev = os.environ["PACK_COMMIT"]
+          expected = os.environ["PACK_DIGEST"]
+          sys.path.insert(0, str(agent))
+          from astrid.core.pack import cli_manage
+          from astrid.core.pack.identity import pack_digest
+          from astrid.core.element import project_packs as pp
+          from astrid.core.element.schema import load_element_definition
+          from astrid.pack_build import compile_element_module
+          import astrid.pack_build as builder
+          import astrid.pack_builder as builder_source
+          
+          def need(ok, message):
+              if not ok:
+                  raise ValueError(message)
+          def sha_bytes(b):
+              return hashlib.sha256(b).hexdigest()
+          def file_record(p):
+              p = pathlib.Path(p)
+              need(p.is_file() and not p.is_symlink(), "not a regular source: "+str(p))
+              b=p.read_bytes()
+              return {"bytes":len(b),"sha256":sha_bytes(b)}
+          def raw(repo, ref, path):
+              return subprocess.check_output(["git","-C",str(repo),"show",ref+":"+path])
+          def file_map():
+              return {p.relative_to(root).as_posix():file_record(p)
+                      for p in sorted(root.rglob("*")) if p.is_file()}
+          def run(args):
+              return subprocess.check_output([str(x) for x in args], text=True).strip()
+          def write():
+              (P/"pack-evidence.json").write_text(json.dumps(evidence,indent=2,sort_keys=True)+"\n",encoding="utf-8")
+          def capture(label, fn):
+              try: return fn()
+              except Exception as exc:
+                  evidence["errors"].append({"stage":label,"type":type(exc).__name__,"detail":str(exc),"traceback":traceback.format_exc()})
+                  write()
+                  return None
+          
+          evidence={"pack_commit":rev,"expected_digest":expected,"agent_commit":os.environ["A"],"errors":[],"elements":[],"scope":"source/renderer compile only; no installed or App delivery claim"}
+          before=None
+          contract=None
+          contract_before=None
+          try:
+              # Verify imports are from actual candidate, not an installed stale module.
+              for module in (cli_manage,pp,builder,builder_source):
+                  f=pathlib.Path(module.__file__).resolve(strict=True)
+                  need(f.is_relative_to(agent),"wrong Agent import "+str(f))
+                  need(f.read_bytes()==raw(agent,os.environ["A"],f.relative_to(agent).as_posix()),"Agent module bytes mismatch "+str(f))
+              before=file_map()
+              tree=subprocess.check_output(["git","-C",str(pack),"ls-tree","-r","-z",rev,"astrid_motion"])
+              expected_names=set()
+              for row in tree.split(b"\0"):
+                  if not row: continue
+                  meta, name=row.split(b"\t",1)
+                  mode, typ, oid=meta.decode().split()
+                  name=name.decode("utf-8")
+                  rel=name.removeprefix("astrid_motion/")
+                  need(typ=="blob" and mode in ("100644","100755"),"unsupported pack tree entry "+name)
+                  expected_names.add(rel)
+                  need(rel in before and before[rel]["sha256"]==sha_bytes(raw(pack,rev,name)),"export differs from Git bytes "+name)
+              need(set(before)==expected_names,"export file set differs from Git tree")
+              evidence["source_files"]=before
+              evidence["digest_before"]=pack_digest(root)
+              need(evidence["digest_before"]==expected,"pack-tree-v1 differs from manifest pin")
+              # Resolve actual selected canonical data; do not treat _editor_build's
+              # None on malformed YAML as success.
+              entry,resources=pp._resources(root,expected_pack_id="astrid_motion")
+              decl=entry.definition.rendering
+              need(len(decl)==20 and all(v["type"]=="element" for v in decl.values()),"expected 20 rendering elements")
+              editors=[k for k,v in entry.definition.ui.items() if v["type"]=="editor"]
+              need(not editors,"browser editor unexpectedly present")
+              need(cli_manage._editor_build(root) is None,"unexpected browser build input")
+              # Run _build_inputs on the exact scratch-export local source, no fetching or state writes.
+              builds,toolchain=cli_manage._build_inputs(str(root.parent),None,{"astrid_motion":"astrid_motion"},None)
+              need(builds=={} and toolchain is None,"browser compiler selected unexpectedly")
+              evidence["browser_editor_build"]={"editor_count":len(editors),"builds":builds,"toolchain":toolchain,"pack_build_needed":False}
+              evidence["canonical_resources"]={}
+              for name,h in sorted(resources.items()):
+                  r=file_record(root/name)
+                  need(r["sha256"]==h.sha256 and r["bytes"]==h.size,"resource bytes mismatch "+name)
+                  evidence["canonical_resources"][name]=r
+              # Keep authoring preview fixtures out of the renderer import precheck.
+              # Hash them above anyway. The renderer admission set is the union of
+              # actual rendering declarations; do not allow an undeclared helper just
+              # because it happens to exist in the exported tree.
+              render_names={d["path"] for d in decl.values()}
+              for d in decl.values():
+                  render_names.update(r["path"] for r in d.get("resources",()))
+              render_resources={n:resources[n] for n in sorted(render_names)}
+              for name in ("rendering/elements/_shared/am.tsx","rendering/elements/_shared/mosaic.tsx"):
+                  need(name in render_resources,"missing declared shared source "+name)
+              evidence["rendering_resources"]={n:evidence["canonical_resources"][n] for n in sorted(render_names)}
+              def imports():
+                  pp._check_imports(root,render_resources)
+                  return True
+              evidence["canonical_import_check"]=capture("canonical rendering import closure",imports) is True
+              # Direct compiler calls are independent diagnostics on the original
+              # bytes, not admission. A failed import gate remains fatal even if
+              # esbuild strips a type-only import or emits a module.
+              node,api=pp._renderer_compiler()
+              need(node.resolve()==pathlib.Path(os.environ["NODE"]).resolve(),"renderer resolved different Node")
+              project=agent/"remotion"
+              need(api.resolve()==(project/"node_modules/esbuild/lib/main.js").resolve(),"renderer resolved different esbuild")
+              need(pp._esbuild_pin(project)=="0.27.7","esbuild pin differs")
+              need(run([node,"--version"])=="v20.19.4","Node version differs")
+              npm=pathlib.Path(os.environ["NPM_CLI"]).resolve(strict=True)
+              need(run([node,npm,"--version"])=="10.8.2","npm version differs")
+              native=project/"node_modules/@esbuild/linux-x64/bin/esbuild"
+              shim=project/"node_modules/esbuild/bin/esbuild"
+              need(run([native,"--version"])=="0.27.7" and run([node,"-e","process.stdout.write(require(process.argv[1]).version)",api])=="0.27.7","esbuild version mismatch")
+              lock=json.loads((project/"package-lock.json").read_bytes())
+              locked={n:lock["packages"][n] for n in ("node_modules/esbuild","node_modules/@esbuild/linux-x64")}
+              need(all(v["version"]=="0.27.7" and v.get("integrity") for v in locked.values()),"esbuild lock provenance missing")
+              evidence["tools"]={"versions":{"node":"20.19.4","npm":"10.8.2","esbuild":"0.27.7"},"locked_packages":locked}
+              for name,path in (("node",node),("npm_cli",npm),("npm_package",npm.parent.parent/"package.json"),("esbuild_api",api),("esbuild_native",native),("esbuild_shim",shim),("esbuild_package",project/"node_modules/esbuild/package.json"),("esbuild_native_package",project/"node_modules/@esbuild/linux-x64/package.json"),("remotion_package",project/"package.json"),("remotion_lock",project/"package-lock.json")):
+                  evidence["tools"][name]={"path":str(path),"realpath":str(path.resolve(strict=True)),**file_record(path.resolve(strict=True))}
+              contract=(agent/"astrid/packs/rendering/shared/element_contracts.ts").resolve(strict=True)
+              need(contract.is_relative_to(agent/"astrid/packs/rendering"),"rendering contract escapes candidate")
+              need(contract.read_bytes()==raw(agent,os.environ["A"],contract.relative_to(agent).as_posix()),"rendering contract differs from Git")
+              contract_before=file_record(contract)
+              evidence["rendering_contract"]={"path":str(contract),**contract_before}
+              evidence["compiler_sources"]={str(pathlib.Path(m.__file__).relative_to(agent)):file_record(m.__file__) for m in (pp,builder,builder_source,cli_manage)}
+              seen=set()
+              for key,d in sorted(decl.items()):
+                  row={"key":key,"descriptor":d["path"],"declared_resources":{r["path"]:evidence["canonical_resources"][r["path"]] for r in d.get("resources",())},"descriptor_bytes":file_record(root/d["path"])}
+                  evidence["elements"].append(row)
+                  def compile_one():
+                      descriptor=root/d["path"]
+                      parsed=yaml.safe_load(descriptor.read_text(encoding="utf-8"))
+                      definition=load_element_definition(descriptor.parent,kind=parsed["kind"],source="pack:astrid_motion",editable=True,priority=100)
+                      component=definition.component.resolve(strict=True).relative_to(root).as_posix()
+                      need(component in render_resources,"component not declared "+component)
+                      need(component not in seen,"duplicate component "+component)
+                      seen.add(component)
+                      row.update({"id":definition.id,"kind":str(definition.kind),"component":component,"component_bytes":file_record(root/component)})
+                      # All actual descriptor-declared assets/support files are resolved and hashed;
+                      # declaration resources above also capture the shared/helper source.
+                      for name in ("assets","support_files"):
+                          refs=[(x.name,x.path) for x in definition.assets] if name=="assets" else [(str(x),x) for x in definition.support_files]
+                          result={}
+                          for k,p in refs:
+                              p=pathlib.Path(p)
+                              p=(p if p.is_absolute() else descriptor.parent/p).resolve(strict=True)
+                              rel=p.relative_to(root).as_posix()
+                              result[str(k)]={"path":rel,**file_record(p)}
+                          row[name]=result
+                      target=P/"modules"/(component+".mjs")
+                      target.parent.mkdir(parents=True,exist_ok=True)
+                      output=compile_element_module(node,api,root,component,pp._node_env(),rendering_contract=contract)
+                      need(bool(output.strip()),"empty compiler output "+component)
+                      target.write_bytes(output)
+                      # Compiler itself requires single ESM/default export. Also parse
+                      # actual emitted .mjs with pinned Node; do not execute element code.
+                      subprocess.run([str(node),"--check",str(target)],env=pp._node_env(),check=True,capture_output=True)
+                      row["output"]={"path":target.relative_to(P).as_posix(),**file_record(target)}
+                      row["compiler_result"]="success"
+                      return True
+                  if capture("compile "+key,compile_one) is not True:
+                      row["compiler_result"]="failed"
+                  write()
+              evidence["successful_modules"]=sum(x.get("compiler_result")=="success" for x in evidence["elements"])
+              need(len(seen)==20 and evidence["successful_modules"]==20,"not 20 distinct successful modules")
+              need(len(list((P/"modules").rglob("*.mjs")))==20,"unexpected module output inventory")
+              need(evidence["canonical_import_check"],"canonical import check failed; compilation cannot admit these bytes")
+          except Exception as exc:
+              evidence["errors"].append({"stage":"pack proof","type":type(exc).__name__,"detail":str(exc),"traceback":traceback.format_exc()})
+          finally:
+              try:
+                  evidence["digest_after"]=pack_digest(root)
+                  need(before is not None and file_map()==before and evidence["digest_after"]==expected,"pack source changed")
+                  if contract_before is not None:
+                      need(file_record(contract)==contract_before,"rendering contract changed")
+              except Exception as exc:
+                  evidence["errors"].append({"stage":"source preservation","type":type(exc).__name__,"detail":str(exc)})
+              evidence["successful_modules"]=sum(x.get("compiler_result")=="success" for x in evidence["elements"])
+              evidence["status"]="failed" if evidence["errors"] or evidence["successful_modules"]!=20 else "source-renderer-verified"
+              write()
+              print(json.dumps({"status":evidence["status"],"compiled":evidence["successful_modules"],"errors":[{"stage":e["stage"],"detail":e["detail"]} for e in evidence["errors"]]},indent=2))
+          sys.exit(0 if evidence["status"]=="source-renderer-verified" else 1)
+          PY
+          # Capture exit, and independently run App boundary checks below even if
+          # the pack compiler fails. Do not promote/assemble on either failure.
+          set +e
+          "$AGENT_PY" "$PACK_PROOF/prove_pack.py" 2>&1 | tee "$PACK_PROOF/compile.log"
+          pack_pipe=("${PIPESTATUS[@]}")
+          set -e
+          printf '%s\n' "${pack_pipe[@]}" > "$PACK_PROOF/compile.exit"
+          cmp "$PACK_PROOF/remotion-package.json" "$AGENT/remotion/package.json"
+          cmp "$PACK_PROOF/remotion-package-lock.json" "$AGENT/remotion/package-lock.json"
+          mkdir "$PACK_PROOF/app-boundary"
+          export APP_BOUNDARY="$PACK_PROOF/app-boundary"
+          # Preserve exact App lock/package and actual vendor provenance bytes.
+          git -C "$APP" show "$P:package-lock.json" > "$APP_BOUNDARY/app-package-lock.json"
+          git -C "$APP" show "$P:package.json" > "$APP_BOUNDARY/app-package.json"
+          git -C "$APP" show "$P:vendor/astrid-browser/provenance.json" > "$APP_BOUNDARY/app-provenance.json"
+          cmp "$APP_BOUNDARY/app-package-lock.json" "$APP/package-lock.json"
+          cmp "$APP_BOUNDARY/app-package.json" "$APP/package.json"
+          cmp "$APP_BOUNDARY/app-provenance.json" "$APP/vendor/astrid-browser/provenance.json"
+          set +e
+          (
+            set -e
+            cd "$APP"
+            "$NODE" "$NPM_CLI" ci --no-audit --no-fund
+            "$NODE" --test scripts/astrid-landing/motion-projection.test.mjs
+            "$NODE" node_modules/vitest/vitest.mjs run --config config/testing/vitest.config.ts config/vite/appBuild.motionProjection.test.ts src/tools/video-editor/runtime/publicCompositionElementRegistry.test.ts
+            "$NODE" --import tsx --input-type=module - <<'JS'
+          import {resolveEditorPackRevisions} from './config/vite/appBuild.ts';
+          import assert from 'node:assert/strict';
+          import {readFileSync,writeFileSync,realpathSync} from 'node:fs';
+          const vendor=realpathSync('vendor/astrid-browser');
+          const p=JSON.parse(readFileSync(vendor+'/provenance.json')).motion_projection;
+          assert.equal(p.upstream_commit,'ec0a9f5baef2c31bc5179087b83f044524575182');
+          assert.equal(p.tree_digest,'414a6fd1241111a7efbc11f443ad80adcb1a4963f96b4575d6de4205745d67c4');
+          const r=resolveEditorPackRevisions(vendor,vendor);
+          assert.ok(r,'App consumed revision validator did not resolve actual vendor projection');
+          assert.equal(r.astrid_motion_tree,p.tree_digest);
+          writeFileSync(process.env.APP_BOUNDARY+'/editor-revisions.json',JSON.stringify(r,null,2)+'\n');
+          console.log(r);
+          JS
+          ) 2>&1 | tee "$APP_BOUNDARY/app-tests.log"
+          app_pipe=("${PIPESTATUS[@]}")
+          set -e
+          printf '%s\n' "${app_pipe[@]}" > "$APP_BOUNDARY/app-tests.exit"
+          cmp "$APP_BOUNDARY/app-package-lock.json" "$APP/package-lock.json"
+          cmp "$APP_BOUNDARY/app-package.json" "$APP/package.json"
+          cmp "$APP_BOUNDARY/app-provenance.json" "$APP/vendor/astrid-browser/provenance.json"
+          set +e
+          (
+            set -e
+            cd "$AGENT"
+            "$AGENT_PY" -m pytest -q -rA tests/packs/rendering/test_render_pack_revisions.py
+            "$AGENT_PY" - <<'PY'
+          import os,json,sys,pathlib
+          sys.path.insert(0,os.environ["AGENT"])
+          from astrid.core.pack.identity import pack_digest
+          from astrid.packs.rendering.rendering.renderers.remotion.pack_revisions import resolved_pack_revisions
+          p=pathlib.Path(os.environ["PACK_PROOF"])
+          root=p/"source/astrid_motion"
+          out=pathlib.Path(os.environ["APP_BOUNDARY"])
+          editor=json.loads((out/"editor-revisions.json").read_bytes())
+          assert pack_digest(root)==os.environ["PACK_DIGEST"]
+          # This is a source-level call of the real consumed revision comparator,
+          # not a claim that these roots were installed or selected by a live editor.
+          stage={"effects":[{"source_pack_id":"astrid_motion","element_root":str(root/"rendering/elements/effects/am-type")}]}
+          rows=resolved_pack_revisions(stage,editor)
+          row=next(x for x in rows if x["pack_id"]=="astrid_motion")
+          (out/"consumed-revisions.json").write_text(json.dumps(rows,indent=2,sort_keys=True)+"\n")
+          print(json.dumps(row,indent=2))
+          assert row["resolved_revision"]==os.environ["PACK_DIGEST"]
+          assert row["editor_revision"]==editor["astrid_motion_tree"]
+          if row["comparison"]!="match":
+              raise SystemExit("selected external pack vs actual App projection: "+row["comparison"]+"; scoped owner disposition required before matched claim")
+          PY
+          ) 2>&1 | tee "$APP_BOUNDARY/agent-comparison.log"
+          compare_pipe=("${PIPESTATUS[@]}")
+          set -e
+          printf '%s\n' "${compare_pipe[@]}" > "$APP_BOUNDARY/agent-comparison.exit"
+          # Original H1a receipt must include everything here except caches and tool
+          # archives not on the artifact allowlist; keep exact bytes/sha and exits.
+          # Do not continue into staged manifest renderer/guard if any check failed.
+          test "${pack_pipe[0]}" -eq 0 && test "${pack_pipe[1]}" -eq 0
+          test "${app_pipe[0]}" -eq 0 && test "${app_pipe[1]}" -eq 0
+          test "${compare_pipe[0]}" -eq 0 && test "${compare_pipe[1]}" -eq 0
       - name: Canonical authored assembly
         shell: bash
         env:

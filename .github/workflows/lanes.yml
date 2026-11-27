@@ -1,203 +1,268 @@
-# The lanes the default vitest run leaves out because they need a sibling checkout, another OS or a tool the
-# vitest job lacks. Each is declared in config/testing/skipRegistry.mjs (LANES) against the job id below.
-name: Lanes
-
-on:
-  push:
-    branches: [main, release-1, "int/**", "release/*/main"]
-  # Nightly, like direct-journey.yml: the siblings' main moves without an App push, and these lanes catch that drift.
-  schedule:
-    - cron: "43 3 * * *"
-  workflow_dispatch:
-
+name: R93 H1a guarded materializer
+on: workflow_dispatch
+permissions:
+  contents: read
 concurrency:
-  group: lanes-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ !(startsWith(github.ref, 'refs/heads/release/') && endsWith(github.ref, '/main')) }}
-
+  group: proof-r93-h1a-1c15a85a
+  cancel-in-progress: false
 jobs:
-  # `npm run test:checkout` (portableVisualSeamIntent, astridSceneAuthoring, localExtensions.catalog) and
-  # `npm run test:astrid-composition`: the Runtime's visual-seam admission and Astrid's own scene code, as siblings.
-  # Siblings come from main, like the journeys: drift between the App and either one is exactly what these catch.
-  checkout-lanes:
+  materialize:
+    if: github.repository == 'banodoco/astrid-app' && github.ref == 'refs/heads/proof/93-h1a-1c15a85a'
     runs-on: ubuntu-latest
-    env:
-      M4_TEST_AGENT_ROOT: ${{ github.workspace }}/astrid-agent
-      M4_TEST_RUNTIME_ROOT: ${{ github.workspace }}/astrid-runtime
-      M4_TEST_PYTHON: ${{ github.workspace }}/astrid-agent/.venv/bin/python
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
         with:
-          path: astrid-app
-      - name: Read the Agent and Runtime pins from the App manifest
-        id: pins
-        run: |
-          node -e '
-            const m = require("./astrid-app/public/install-manifest.json");
-            const agent = m.agent?.sha, runtime = m.runtime?.sha;
-            for (const sha of [agent, runtime]) if (!/^[0-9a-f]{40}$/.test(sha ?? "")) throw new Error(`manifest pin is not a full SHA: ${sha}`);
-            require("fs").appendFileSync(process.env.GITHUB_OUTPUT, `agent_sha=${agent}\nruntime_sha=${runtime}\n`);'
-      - uses: actions/checkout@v4
-        with:
-          repository: banodoco/astrid-runtime
-          ref: ${{ steps.pins.outputs.runtime_sha }}
-          path: astrid-runtime
-          token: ${{ secrets.RUNTIME_READ_TOKEN || github.token }}
+          repository: banodoco/astrid-app
+          ref: cc1d48f016fde55ad6b0609c619d8a4bcec56823
+          path: app
+          fetch-depth: 0
+          persist-credentials: false
       - uses: actions/checkout@v4
         with:
           repository: banodoco/astrid-agent
-          ref: ${{ steps.pins.outputs.agent_sha }}
-          path: astrid-agent
-          token: ${{ secrets.ASTRID_READ_TOKEN || github.token }}
-      - name: Restore npm cache (C-08)
-        id: c08-app-lanes-1
-        uses: actions/cache/restore@v4
-        with:
-          path: "${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}"
-          key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('astrid-app/package-lock.json') }}
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: astrid-app/.nvmrc
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - name: Install App dependencies
-        working-directory: astrid-app
-        run: npm ci --legacy-peer-deps
-      - name: Build the Agent venv for the checkout lane (with the sibling Runtime)
-        working-directory: astrid-agent
-        run: |
-          python -m venv .venv
-          .venv/bin/python -m pip install -e .
-          .venv/bin/python -m pip install --no-deps -e ../astrid-runtime -e ../astrid-runtime/packages/python
-          echo "M4_TEST_PYTHON_SITE=$(.venv/bin/python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')" >> "$GITHUB_ENV"
-      - name: Checkout lane
-        working-directory: astrid-app
-        env:
-          ASTRID_CHECKOUT: ${{ github.workspace }}/astrid-agent
-          ASTRID_RUNTIME_CHECKOUT: ${{ github.workspace }}/astrid-runtime
-        run: npm run test:checkout
-      - name: Astrid composition lane
-        working-directory: astrid-app
-        env:
-          ASTRID_CHECKOUT: ${{ github.workspace }}/astrid-agent
-        run: npm run test:astrid-composition
-
-  # scripts/installer/bootstrap.test.mjs: the POSIX installer against a fixture, on both OSes it supports
-  # (macOS keeps its data under HOME, Linux honours XDG_*).
-      - name: Save npm cache on main or int branches (C-08)
-        if: ${{ always() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/int/') || (startsWith(github.ref, 'refs/heads/release/') && endsWith(github.ref, '/main'))) && steps.c08-app-lanes-1.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v4
-        with:
-          path: "${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}"
-          key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('astrid-app/package-lock.json') }}
-
-  installer-posix:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
-      - run: node --test --test-concurrency=1 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./scripts/quality/node-skip-guard-reporter.mjs --test-reporter-destination=stdout scripts/installer/bootstrap.test.mjs
-
-  # scripts/installer/bootstrap-powershell.test.mjs: the PowerShell installer under pwsh (preinstalled on ubuntu-latest).
-  installer-powershell:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
-      - run: pwsh --version
-      - run: node --test --test-concurrency=1 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./scripts/quality/node-skip-guard-reporter.mjs --test-reporter-destination=stdout scripts/installer/bootstrap-powershell.test.mjs
-
-  # The "quick: Astrid edit then App edit" case of three-products.spec.ts needs a Runtime realm that Astrid's own
-  # journey adopts and describes (ASTRID_QUICK_DESCRIPTOR). `astrid.core.dev.journey --tier quick` builds a generated
-  # reference realm, adopts it, starts the Runtime with its browser door, writes the descriptor and runs that one case
-  # (playwright.three-products.config.ts greps it in when the variable is set), then renders the saved revision.
-  quick-journey:
-    runs-on: ubuntu-24.04
-    # A hang guard only: the journey has no deadline of its own, and a stalled apt download once held a runner for 30 minutes.
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          path: astrid-app
+          ref: 1c15a85a928ae77cd16ea1a2ed029697e3af4f3c
+          path: agent
           fetch-depth: 0
-          filter: blob:none
-      - name: Read the Agent and Runtime pins from the App manifest
-        id: pins
-        run: |
-          node -e '
-            const m = require("./astrid-app/public/install-manifest.json");
-            const agent = m.agent?.sha, runtime = m.runtime?.sha;
-            for (const sha of [agent, runtime]) if (!/^[0-9a-f]{40}$/.test(sha ?? "")) throw new Error(`manifest pin is not a full SHA: ${sha}`);
-            require("fs").appendFileSync(process.env.GITHUB_OUTPUT, `agent_sha=${agent}\nruntime_sha=${runtime}\n`);'
+          persist-credentials: false
       - uses: actions/checkout@v4
         with:
           repository: banodoco/astrid-runtime
-          ref: ${{ steps.pins.outputs.runtime_sha }}
-          path: astrid-runtime
+          ref: 686ca695469bda48cd40a70824c4ccef2a137284
+          path: runtime
           fetch-depth: 0
-          filter: blob:none
-          token: ${{ secrets.RUNTIME_READ_TOKEN || github.token }}
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: banodoco/VibeComfy
+          ref: 55c3948212d23cf037fae8a4c6faad77d33e7279
+          path: vibe
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: banodoco/runpod-lifecycle
+          ref: 9f88ef7640bc664f697112d966ecefa123d44340
+          path: life
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: banodoco/poms_packs
+          ref: 2379ab54aca522019ff4f869cfdf9375bdb56dfc
+          path: pack
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: banodoco/oh-my-pi
+          ref: 78f0e0960f471c2c62b943272a48c33366f239fe
+          path: omp
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: banodoco/astrid-dev
+          ref: 394cd8c7051d82c36fac8ea9ede9c6d4e14d5c0c
+          path: dev
+          fetch-depth: 0
+          persist-credentials: false
       - uses: actions/checkout@v4
         with:
           repository: banodoco/astrid-agent
-          ref: ${{ steps.pins.outputs.agent_sha }}
-          path: astrid-agent
+          ref: dc45d97c6bc2734cbfb9b2a25b43cb40ed5757e5
+          path: r15agent
           fetch-depth: 0
-          filter: blob:none
-          token: ${{ secrets.ASTRID_READ_TOKEN || github.token }}
-      # The renderer's Node is pinned by astrid-agent/remotion (=20.19.4); the journey refuses any other.
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20.19.4"
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-      # A stalled apt download once held a runner for 30 minutes: retry and time out every apt call in this job,
-      # including the one inside `playwright install --with-deps`.
-      - name: Harden apt
+          python-version: '3.13'
+      - uses: astral-sh/setup-uv@v5
+      - name: Guard source and served predecessor
+        shell: bash
         run: |
-          printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' | sudo tee /etc/apt/apt.conf.d/99-lanes-retries
-          sudo apt-get update
-      - name: Install ffmpeg
-        run: sudo apt-get install -y --no-install-recommends ffmpeg
-      # The App harness looks for the Runtime venv at <runtime>/.venv (it is only attached to here, never started by the case).
-      - name: Build the Runtime venv
-        working-directory: astrid-runtime
-        run: |
-          python -m venv .venv
-          .venv/bin/python -m pip install -e .
-          .venv/bin/python -m runtime_protocol.cli --help > /dev/null
-      - name: Build the Astrid venv (with the sibling Runtime)
-        working-directory: astrid-agent
-        run: |
-          python -m venv .venv
-          .venv/bin/python -m pip install -e .
-          .venv/bin/python -m pip install --no-deps -e ../astrid-runtime -e ../astrid-runtime/packages/python
-          npm ci --prefix remotion
-          (cd remotion && npx remotion browser ensure)
-      - name: Install App dependencies and Chrome
-        working-directory: astrid-app
-        run: |
-          npm ci --legacy-peer-deps
-          npx playwright install --with-deps chrome
-      - name: Run the quick journey
-        working-directory: astrid-agent
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/h1a/served"
+          S="$RUNNER_TEMP/h1a"
+          exec > >(tee "$S/precheck.log") 2>&1
+          date -u +%FT%TZ
+          uname -a
+          df -Pk "$RUNNER_TEMP"
+          test "$(df -Pk "$RUNNER_TEMP" | awk 'NR==2 {printf "%.0f",$4*1024}')" -gt 10737418240
+          test "$(git -C "$GITHUB_WORKSPACE/app" rev-parse HEAD)" = cc1d48f016fde55ad6b0609c619d8a4bcec56823
+          test -z "$(git -C "$GITHUB_WORKSPACE/app" status --porcelain --untracked-files=all)"
+          git -C "$GITHUB_WORKSPACE/app" show -s --format='app %H %T %cI' HEAD
+          test "$(git -C "$GITHUB_WORKSPACE/agent" rev-parse HEAD)" = 1c15a85a928ae77cd16ea1a2ed029697e3af4f3c
+          test -z "$(git -C "$GITHUB_WORKSPACE/agent" status --porcelain --untracked-files=all)"
+          git -C "$GITHUB_WORKSPACE/agent" show -s --format='agent %H %T %cI' HEAD
+          test "$(git -C "$GITHUB_WORKSPACE/runtime" rev-parse HEAD)" = 686ca695469bda48cd40a70824c4ccef2a137284
+          test -z "$(git -C "$GITHUB_WORKSPACE/runtime" status --porcelain --untracked-files=all)"
+          git -C "$GITHUB_WORKSPACE/runtime" show -s --format='runtime %H %T %cI' HEAD
+          test "$(git -C "$GITHUB_WORKSPACE/vibe" rev-parse HEAD)" = 55c3948212d23cf037fae8a4c6faad77d33e7279
+          test -z "$(git -C "$GITHUB_WORKSPACE/vibe" status --porcelain --untracked-files=all)"
+          git -C "$GITHUB_WORKSPACE/vibe" show -s --format='vibe %H %T %cI' HEAD
+          test "$(git -C "$GITHUB_WORKSPACE/life" rev-parse HEAD)" = 9f88ef7640bc664f697112d966ecefa123d44340
+          test -z "$(git -C "$GITHUB_WORKSPACE/life" status --porcelain --untracked-files=all)"
+          git -C "$GITHUB_WORKSPACE/life" show -s --format='life %H %T %cI' HEAD
+          test "$(git -C "$GITHUB_WORKSPACE/pack" rev-parse HEAD)" = 2379ab54aca522019ff4f869cfdf9375bdb56dfc
+          test -z "$(git -C "$GITHUB_WORKSPACE/pack" status --porcelain --untracked-files=all)"
+          git -C "$GITHUB_WORKSPACE/pack" show -s --format='pack %H %T %cI' HEAD
+          test "$(git -C "$GITHUB_WORKSPACE/omp" rev-parse HEAD)" = 78f0e0960f471c2c62b943272a48c33366f239fe
+          test -z "$(git -C "$GITHUB_WORKSPACE/omp" status --porcelain --untracked-files=all)"
+          git -C "$GITHUB_WORKSPACE/omp" show -s --format='omp %H %T %cI' HEAD
+          test "$(git -C "$GITHUB_WORKSPACE/dev" rev-parse HEAD)" = 394cd8c7051d82c36fac8ea9ede9c6d4e14d5c0c
+          test -z "$(git -C "$GITHUB_WORKSPACE/dev" status --porcelain --untracked-files=all)"
+          git -C "$GITHUB_WORKSPACE/dev" show -s --format='dev %H %T %cI' HEAD
+          test "$(git -C "$GITHUB_WORKSPACE/r15agent" rev-parse HEAD)" = dc45d97c6bc2734cbfb9b2a25b43cb40ed5757e5
+          test -z "$(git -C "$GITHUB_WORKSPACE/r15agent" status --porcelain --untracked-files=all)"
+          git -C "$GITHUB_WORKSPACE/r15agent" show -s --format='r15agent %H %T %cI' HEAD
+          git -C "$GITHUB_WORKSPACE/agent" merge-base --is-ancestor dc45d97c6bc2734cbfb9b2a25b43cb40ed5757e5 1c15a85a928ae77cd16ea1a2ed029697e3af4f3c
+          git -C "$GITHUB_WORKSPACE/agent" merge-base --is-ancestor eb4427df2d505cdd3a00d067713e8cf289f2ad99 1c15a85a928ae77cd16ea1a2ed029697e3af4f3c
+          for f in install-manifest.json install install.ps1 install.sh; do
+            curl -fLsS --max-time 30 -H 'Cache-Control: no-cache' -D "$S/served/$f.headers" -o "$S/served/$f" -w '%{http_code} %{url_effective}\n' "https://astrid.haus/$f"
+            git -C "$GITHUB_WORKSPACE/app" show "cc1d48f016fde55ad6b0609c619d8a4bcec56823:public/$f" > "$S/source-$f"
+            cmp "$S/source-$f" "$S/served/$f"
+            sha256sum "$S/served/$f"
+          done
+          python -c 'import json,os; m=json.load(open(os.environ["RUNNER_TEMP"]+"/h1a/served/install-manifest.json")); assert type(m["release"]) is int and m["release"]==15; assert m["required"]["release"]==15 and m["required"]["reason"].strip(); print("LIVE_REQUIRED",m["required"])'
+          curl -fLsS --max-time 30 -o "$S/node-SHASUMS256.txt" https://nodejs.org/dist/v20.19.4/SHASUMS256.txt
+          grep -Fx 'd80a33707605ced9a31b8f543cea9ab512bc3d2fef2c148f31a50e939ff07560  node-v20.19.4-linux-x64.tar.gz' "$S/node-SHASUMS256.txt"
+          curl -fLsS --max-time 180 -o "$S/node.tar.gz" https://nodejs.org/dist/v20.19.4/node-v20.19.4-linux-x64.tar.gz
+          echo 'd80a33707605ced9a31b8f543cea9ab512bc3d2fef2c148f31a50e939ff07560  ' "$S/node.tar.gz" | sha256sum -c -
+          mkdir "$S/node"
+          tar -xzf "$S/node.tar.gz" -C "$S/node" --strip-components=1
+          test "$("$S/node/bin/node" --version)" = v20.19.4
+          sha256sum "$S/node/bin/node"
+          # The selected pack references _shared source while the predecessor has no
+          # pack_build lock. This is an actual unresolved compatibility precondition,
+          # not a claim that a lock is necessarily required. Stop before rendering.
+          python -c 'import json,os,pathlib; w=pathlib.Path(os.environ["GITHUB_WORKSPACE"]); m=json.load(open(w/"app/public/install-manifest.json")); p=(w/"pack/astrid_motion/pack.yaml").read_text(); assert "pack_build" not in m; assert "rendering/elements/_shared/" in p; print("PRECONDITION_UNRESOLVED: shared-module compiler/build compatibility is not yet established")'
+          exit 3
+      - name: Canonical authored assembly
+        shell: bash
         env:
-          ASTRID_RUNTIME_CHECKOUT: ${{ github.workspace }}/astrid-runtime
-        run: .venv/bin/python -m astrid.core.dev.journey --tier quick --reference generated --app-checkout ../astrid-app --summary "$RUNNER_TEMP/quick-journey.json"
-      - uses: actions/upload-artifact@v4
-        if: ${{ !cancelled() }}
+          S: ${{ runner.temp }}/h1a
+          APP: ${{ github.workspace }}/app
+          AGENT: ${{ github.workspace }}/agent
+          RUNTIME: ${{ github.workspace }}/runtime
+          VIBE: ${{ github.workspace }}/vibe
+          LIFE: ${{ github.workspace }}/life
+          PACK: ${{ github.workspace }}/pack
+          OMP: ${{ github.workspace }}/omp
+          NODE: ${{ runner.temp }}/h1a/node/bin/node
+          AGENT_PY: ${{ github.workspace }}/agent.env/venv/bin/python
+        run: |
+          set -euo pipefail
+          export P=cc1d48f016fde55ad6b0609c619d8a4bcec56823
+          export A=1c15a85a928ae77cd16ea1a2ed029697e3af4f3c
+          export R=686ca695469bda48cd40a70824c4ccef2a137284
+          # S, APP, AGENT, RUNTIME, VIBE, LIFE, PACK, OMP, NODE, AGENT_PY exported by custodian
+          cd "$S"
+          test "$("$NODE" --version)" = v20.19.4
+          for f in install install.ps1 install.sh; do git -C "$APP" show "$P:public/$f" > "$f"; done
+          git -C "$APP" show "$P:scripts/installer/pin.mjs" > pin.mjs
+          git -C "$APP" show "$P:scripts/installer/release-guard.mjs" > release-guard.mjs
+          git -C "$APP" show "$P:public/install-manifest.json" > predecessor.json
+          "$AGENT_PY" - <<'PY'
+          import os, json, hashlib, pathlib, subprocess, struct, datetime
+          S=pathlib.Path(os.environ["S"])
+          def out(name, obj):
+              (S/name).write_text(json.dumps(obj, indent=2, ensure_ascii=True)+"\n", encoding="utf-8")
+          def raw(repo, ref, path):
+              return subprocess.check_output(["git","-C",os.environ[repo],"show",ref+":"+path])
+          def obj(repo, ref, path): return json.loads(raw(repo,ref,path))
+          def h(b): return hashlib.sha256(b).hexdigest()
+          def require(ok, msg):
+              if not ok: raise SystemExit(msg)
+          P,A,R=[os.environ[k] for k in ("P","A","R")]
+          prev=json.loads((S/"predecessor.json").read_bytes())
+          served_raw=(S/"served/install-manifest.json").read_bytes()
+          served=json.loads(served_raw)
+          require(type(served["release"]) is int and served["release"]==15 and prev==served, "actual predecessor/served mismatch")
+          require(h((S/"predecessor.json").read_bytes())=="3ccc767c11fa0d08551bce7e73f88e72877a9657fb8dec08dc20ac3a4739e4bb","unexpected predecessor bytes")
+          for n,expected in {
+          "install":"c268a5fae7ff318414745cee7bfcec13b6d7a81434f7aaa10d218ffe28248fff",
+          "install.ps1":"ea581d5d7c2d02f9f062dc15affabe1f7c3e38d641984cecf4797f13ac58b3a9",
+          "install.sh":"591c4c51b148fccef2a7d1c45782d9ff949d5fd03d46cd82b5591e3a23d1b285",
+          "pin.mjs":"e075d56f22dd0ccbf7b45a8eb1422fab006c11fa452e932ba15d1f1058eef37c",
+          "release-guard.mjs":"e25b99e42a9554b719c04e66be494abda79bcf4dc7f8a215dc5557c57fd7f9e0"}.items():
+              require(h((S/n).read_bytes())==expected, "source byte mismatch "+n)
+              if n.startswith("install"): require((S/n).read_bytes()==(S/"served"/n).read_bytes(),"served bootstrap mismatch "+n)
+          al=obj("AGENT",A,"runtime.lock.json")
+          pl=obj("APP",P,"runtime.lock.json")
+          art=obj("RUNTIME",R,"contract/artifacts.json")
+          require(al["source_commit"]==pl["source_commit"]==R, "Runtime lock source mismatch")
+          require(al["producer_version"]==pl["producer_version"]==art["version"], "Runtime producer version mismatch")
+          for repo,ref,lock in (("APP",P,pl),("AGENT",A,al)):
+              for dest,v in lock["files"].items():
+                  source=raw("RUNTIME",R,v["from"])
+                  require("sha256:"+h(source)==v["sha256"]==art["artifacts"][v["from"]], "Runtime source artifact mismatch "+v["from"])
+                  require("sha256:"+h(raw(repo,ref,dest))==v["sha256"],repo+" lock destination mismatch "+dest)
+          pins=obj("AGENT",A,"astrid/packs/runpod/pins.json")["sources"]
+          local=obj("AGENT",A,"astrid/packs/vibecomfy/pins.json")["sources"]
+          require(pins["vibecomfy"]==local["vibecomfy"], "VibeComfy pins differ")
+          v,l=pins["vibecomfy"],pins["lifecycle"]
+          require(v["revision"]=="55c3948212d23cf037fae8a4c6faad77d33e7279" and l["revision"]=="9f88ef7640bc664f697112d966ecefa123d44340", "changed selected pins; rebuild")
+          contract=obj("RUNTIME",R,"contract/manifest.json")
+          d=hashlib.sha256()
+          for name in [contract["openapi"],*contract["schemas"]]:
+              p="contract/"+name
+              b=raw("RUNTIME",R,p); n=p.encode()
+              d.update(struct.pack(">I",len(n))); d.update(n); d.update(struct.pack(">Q",len(b))); d.update(b)
+          schema="sha256:"+d.hexdigest()
+          require(schema==prev["runtime"]["schema_digest"],"same Runtime digest differs from predecessor; investigate")
+          # Actual live policy, not a guessed prior floor. Preserve absent policy if actually absent.
+          policy={"present":"required" in served,"value":served.get("required"),"served_sha256":h(served_raw),"origin":"https://astrid.haus/install-manifest.json"}
+          if policy["present"]:
+              r=policy["value"]
+              require(isinstance(r,dict) and type(r["release"]) is int and 0<=r["release"]<=15 and isinstance(r["reason"],str) and bool(r["reason"].strip()),"invalid served floor/reason")
+          tools=prev["tools"]; packs=prev["packs"]
+          require({k:tools[k]["version"] for k in ("uv","python","bun","node","ffmpeg")}=={"uv":"0.11.32","python":"3.11.13","bun":"1.3.14","node":"20.19.4","ffmpeg":"7.0.2"},"tool selection changed")
+          require(tools["omp"]["source"]=={"repo":"https://github.com/banodoco/oh-my-pi","sha":"78f0e0960f471c2c62b943272a48c33366f239fe"},"OMP selection changed")
+          require(packs=={"astrid_motion":{"repo":"https://github.com/banodoco/poms_packs","commit":"2379ab54aca522019ff4f869cfdf9375bdb56dfc","digest_rule":"pack-tree-v1","digest":"75234c10217e67ec0f111a4cb6be4a6252e172a9cd382506498d07ce1d241029"}},"pack selection changed")
+          require("pack_build" not in prev,"pack-build proposal changed; review")
+          recipe=obj("AGENT",A,"astrid/installer/omp/recipe.json")
+          require(recipe["bun_version"]==tools["bun"]["version"] and h(raw("OMP",tools["omp"]["source"]["sha"],"bun.lock"))==recipe["bun_lock_sha256"],"OMP recipe lock mismatch")
+          record={"record_version":1,"record_id":"R93-H1a/2026-11-27/initial-A-trial","release":16,"schema_version":1,"scope":"A-landed packaging/source/installer compatibility trial; not Final or installed proof","app":P,"agent":A,"runtime":R,"runtime_schema_digest":schema,"vibecomfy":v,"lifecycle":l,"policy":policy,"tools":tools,"packs":packs,"pack_build_present":False,"unchanged_pin_source":{"app":P,"manifest_sha256":h((S/"predecessor.json").read_bytes())},"utc":datetime.datetime.now(datetime.timezone.utc).isoformat()}
+          out("input-record.json",record)
+          # New object, not copying/relabeling the R15 manifest. Pin CLI still runs.
+          staged={"schema_version":1,"release":16,"agent":{"sha":A},"runtime":{"sha":R,"schema_digest":schema},"packs":record["packs"],"tools":record["tools"],"vibecomfy":{"sha":v["revision"]},"lifecycle":{"repo":l["repository"],"sha":l["revision"],"version":l["version"]}}
+          if policy["present"]: staged["required"]=policy["value"]
+          out("staged-input.json",staged)
+          print("Explicit release 16 staged input; independent Runtime digest",schema)
+          PY
+          "$NODE" pin.mjs --in staged-input.json --out install-manifest.json "$A"
+          "$NODE" pin.mjs --in install-manifest.json --check
+          "$NODE" --input-type=module - <<'JS'
+          import {readFileSync} from 'node:fs';
+          import assert from 'node:assert/strict';
+          import {checkReleaseGuard,readSnapshot,checkAppRuntimeLock} from './release-guard.mjs';
+          const b=readSnapshot(process.env.APP,process.env.P);
+          const head=readSnapshot(process.env.APP,process.env.P);
+          const read=(f)=>readFileSync(f);
+          const previous=JSON.parse(b.manifest), served=JSON.parse(read('served/install-manifest.json'));
+          assert.deepEqual(previous,served);
+          b.manifest=read('served/install-manifest.json');
+          head.manifest=read('install-manifest.json');
+          for(const k of Object.keys(head.bootstraps)){
+            assert.ok(head.bootstraps[k].equals(read(k.replace('public/',''))));
+            assert.ok(b.bootstraps[k].equals(read('served/'+k.replace('public/',''))));
+            b.bootstraps[k]=read('served/'+k.replace('public/',''));
+          }
+          const m=JSON.parse(head.manifest), s=JSON.parse(read('staged-input.json'));
+          assert.equal(m.release,16); assert.equal(m.agent.sha,process.env.A); assert.equal(m.runtime.sha,process.env.R);
+          assert.deepEqual(m,s); // stage already independently derived; pinned renderer must confirm, not change the verified inputs
+          assert.equal(Object.hasOwn(m,'required'),Object.hasOwn(served,'required'));
+          assert.equal(JSON.stringify(m.required),JSON.stringify(served.required));
+          console.log(checkReleaseGuard({base:b,head}));
+          console.log(checkAppRuntimeLock(m,readFileSync(process.env.APP+'/runtime.lock.json')));
+          JS
+      - name: Preserve precheck evidence only
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          name: quick-journey
+          name: r93-h1a-precheck-only
           path: |
-            ${{ runner.temp }}/quick-journey.json
-            ${{ runner.temp }}/quick-journey.txt
+            ${{ runner.temp }}/h1a/precheck.log
+            ${{ runner.temp }}/h1a/served/
           if-no-files-found: warn
